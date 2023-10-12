@@ -43,6 +43,8 @@ open class ZLCustomCamera: UIViewController {
     
     @objc public var takeDoneBlock: ((UIImage?, URL?) -> Void)?
     
+    @objc public var takesDoneBlock: (([UIImage], URL?) -> Void)?
+    
     @objc public var cancelBlock: (() -> Void)?
     
     public lazy var tipsLabel: UILabel = {
@@ -172,6 +174,11 @@ open class ZLCustomCamera: UIViewController {
     private var hideTipsTimer: Timer?
     
     private var takedImage: UIImage?
+    
+    public var takedCount: Int = 1
+    
+    // 存储拍摄的图片，需要拍摄多张时
+    private var takedImages: [UIImage] = []
     
     private var videoUrl: URL?
     
@@ -846,9 +853,14 @@ open class ZLCustomCamera: UIViewController {
             return
         }
         
-        ZLEditImageViewController.showEditImageVC(parentVC: self, image: takedImage) { [weak self] in
+        let isShowContinue = takedImages.count < self.takedCount - 1
+        ZLEditImageViewController.showEditImageVC(parentVC: self, image: takedImage, isShowContinue: isShowContinue) { [weak self] in
+            self?.retakeBtnClick()
+        } continueTakingBlock: { [weak self] editImage, _ in
+            self?.takedImages.append(editImage)
             self?.retakeBtnClick()
         } completion: { [weak self] editImage, _ in
+            self?.takedImages.append(editImage)
             self?.takedImage = editImage
             self?.takedImageView.image = editImage
             self?.doneBtnClick()
@@ -860,7 +872,11 @@ open class ZLCustomCamera: UIViewController {
         // 置为nil会导致卡顿，先注释，不影响内存释放
 //        self.recordVideoPlayerLayer?.player = nil
         dismiss(animated: true) {
-            self.takeDoneBlock?(self.takedImage, self.videoUrl)
+            if self.takedCount == 1 {
+                self.takeDoneBlock?(self.takedImage, self.videoUrl)
+            } else {
+                self.takesDoneBlock?(self.takedImages, self.videoUrl)
+            }
         }
     }
     

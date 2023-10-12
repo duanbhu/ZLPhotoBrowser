@@ -289,6 +289,19 @@ open class ZLEditImageViewController: UIViewController {
         return btn
     }()
     
+    @objc public lazy var nextBtn: UIButton = {
+        let btn = UIButton(type: .custom)
+        btn.titleLabel?.font = ZLLayout.bottomToolTitleFont
+        btn.setTitle(localLanguageTextValue(.next), for: .normal)
+        btn.setTitleColor(.zl.bottomToolViewDoneBtnNormalTitleColor, for: .normal)
+        btn.addTarget(self, action: #selector(nextBtnClick), for: .touchUpInside)
+        btn.layer.masksToBounds = true
+        btn.layer.cornerRadius = ZLLayout.bottomToolBtnCornerRadius
+        btn.layer.borderColor = UIColor.white.cgColor
+        btn.layer.borderWidth = 1
+        return btn
+    }()
+    
     @objc public lazy var undoBtn: ZLEnlargeButton = {
         let btn = ZLEnlargeButton(type: .custom)
         if isRTL() {
@@ -354,6 +367,11 @@ open class ZLEditImageViewController: UIViewController {
     
     @objc public var cancelEditBlock: (() -> Void)?
     
+    /// 保存当前图片，继续拍摄
+    @objc public var continueTakingBlock: ((UIImage, ZLEditImageModel?) -> Void)?
+    
+    private var isShowContinue: Bool = false
+    
     override public var prefersStatusBarHidden: Bool {
         return true
     }
@@ -371,8 +389,10 @@ open class ZLEditImageViewController: UIViewController {
         parentVC: UIViewController?,
         animate: Bool = false,
         image: UIImage,
+        isShowContinue: Bool = false,
         editModel: ZLEditImageModel? = nil,
         cancel: (() -> Void)? = nil,
+        continueTakingBlock: ((UIImage, ZLEditImageModel?) -> Void)? = nil,
         completion: ((UIImage, ZLEditImageModel?) -> Void)?
     ) {
         let tools = ZLPhotoConfiguration.default().editImageConfiguration.tools
@@ -401,10 +421,12 @@ open class ZLEditImageViewController: UIViewController {
             parentVC?.present(vc, animated: animate, completion: nil)
         } else {
             let vc = ZLEditImageViewController(image: image, editModel: editModel)
+            vc.isShowContinue = isShowContinue
             vc.editFinishBlock = { ei, editImageModel in
                 completion?(ei, editImageModel)
             }
             vc.cancelEditBlock = cancel
+            vc.continueTakingBlock = continueTakingBlock
             vc.animate = animate
             vc.modalPresentationStyle = .fullScreen
             parentVC?.present(vc, animated: animate, completion: nil)
@@ -547,6 +569,9 @@ open class ZLEditImageViewController: UIViewController {
         let doneBtnW = localLanguageTextValue(.editFinish).zl.boundingRect(font: ZLLayout.bottomToolTitleFont, limitSize: CGSize(width: CGFloat.greatestFiniteMagnitude, height: doneBtnH)).width + 20
         doneBtn.frame = CGRect(x: view.zl.width - 20 - doneBtnW, y: toolY - 2, width: doneBtnW, height: doneBtnH)
         
+        let nextBtnW = localLanguageTextValue(.next).zl.boundingRect(font: ZLLayout.bottomToolTitleFont, limitSize: CGSize(width: CGFloat.greatestFiniteMagnitude, height: doneBtnH)).width + 20
+        nextBtn.frame = CGRect(x: view.zl.width - 20 - nextBtnW, y: doneBtn.zl.top - doneBtnH - 40, width: nextBtnW, height: doneBtnH)
+        
         editToolCollectionView.frame = CGRect(x: 20, y: toolY, width: view.zl.width - 20 - 20 - doneBtnW - 20, height: 30)
         
         if !drawPaths.isEmpty {
@@ -681,6 +706,8 @@ open class ZLEditImageViewController: UIViewController {
         view.addSubview(bottomShadowView)
         bottomShadowView.addSubview(editToolCollectionView)
         bottomShadowView.addSubview(doneBtn)
+        bottomShadowView.addSubview(nextBtn)
+        nextBtn.isHidden = !isShowContinue
         
         if tools.contains(.draw) {
             let drawColorLayout = ZLCollectionViewFlowLayout()
@@ -969,6 +996,63 @@ open class ZLEditImageViewController: UIViewController {
             adjustSlider?.value = currentAdjustStatus.contrast
         case .saturation:
             adjustSlider?.value = currentAdjustStatus.saturation
+        }
+    }
+    
+    // 继续拍摄
+    @objc private func nextBtnClick() {
+        var stickerStates: [ZLBaseStickertState] = []
+        for view in stickersContainer.subviews {
+            guard let view = view as? ZLBaseStickerView else { continue }
+            stickerStates.append(view.state)
+        }
+        
+        var hasEdit = true
+        if drawPaths.isEmpty,
+           currentClipStatus.editRect.size == imageSize,
+           currentClipStatus.angle == 0,
+           mosaicPaths.isEmpty,
+           stickerStates.isEmpty,
+           currentFilter.applier == nil,
+           currentAdjustStatus.allValueIsZero {
+            hasEdit = false
+        }
+        
+        var resImage = originalImage
+        var editModel: ZLEditImageModel?
+        
+        func callback() {
+            dismiss(animated: animate) {
+                self.continueTakingBlock?(resImage, editModel)
+            }
+        }
+        
+        guard hasEdit else {
+            callback()
+            return
+        }
+        
+        let hud = ZLProgressHUD.show(toast: .processing)
+        DispatchQueue.main.async { [self] in
+            resImage = buildImage()
+            resImage = resImage.zl
+                .clipImage(
+                    angle: currentClipStatus.angle,
+                    editRect: currentClipStatus.editRect,
+                    isCircle: currentClipStatus.ratio?.isCircle ?? false
+                ) ?? resImage
+            editModel = ZLEditImageModel(
+                drawPaths: drawPaths,
+                mosaicPaths: mosaicPaths,
+                clipStatus: currentClipStatus,
+                adjustStatus: currentAdjustStatus,
+                selectFilter: currentFilter,
+                stickers: stickerStates,
+                actions: editorManager.actions
+            )
+
+            hud.hide()
+            callback()
         }
     }
     

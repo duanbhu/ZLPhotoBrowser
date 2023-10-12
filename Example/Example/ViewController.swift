@@ -354,8 +354,14 @@ class ViewController: UIViewController {
     
     @objc func showCamera() {
         let camera = ZLCustomCamera()
-        camera.takeDoneBlock = { [weak self] image, videoUrl in
-            self?.save(image: image, videoUrl: videoUrl)
+        camera.takedCount = 4
+//        camera.takeDoneBlock = { [weak self] image, videoUrl in
+//            self?.save(image: image, videoUrl: videoUrl)
+//        }
+        camera.takesDoneBlock = { [weak self] images, _ in
+            images.forEach {
+                self?.save(image: $0, videoUrl: nil)
+            }
         }
         showDetailViewController(camera, sender: nil)
     }
@@ -366,9 +372,9 @@ class ViewController: UIViewController {
             ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] suc, asset in
                 if suc, let asset = asset {
                     let resultModel = ZLResultModel(asset: asset, image: image, isEdited: false, index: 0)
-                    self?.selectedResults = [resultModel]
-                    self?.selectedImages = [image]
-                    self?.selectedAssets = [asset]
+                    self?.selectedResults.append(resultModel)
+                    self?.selectedImages.append(image)
+                    self?.selectedAssets.append(asset)
                     self?.collectionView.reloadData()
                 } else {
                     debugPrint("保存图片到相册失败")
