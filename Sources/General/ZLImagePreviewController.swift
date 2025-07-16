@@ -77,7 +77,7 @@ open class ZLImagePreviewController: UIViewController {
         return view
     }()
     
-    private lazy var navView: UIView = {
+    public private(set) lazy var navView: UIView = {
         let view = UIView()
         view.backgroundColor = .zl.navBarColorOfPreviewVC
         return view
@@ -211,7 +211,6 @@ open class ZLImagePreviewController: UIViewController {
             return
         }
         isFirstAppear = false
-        
         reloadCurrentCell()
     }
     
