@@ -582,4 +582,23 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
         let cancelAction = ZLCustomAlertAction(title: localLanguageTextValue(.cancel), style: .cancel, handler: nil)
         showAlertController(title: nil, message: "", style: .actionSheet, actions: [saveAction, cancelAction], sender: self)
     }
+    
+    public func saveImageWithOthers() {
+        guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) as? ZLLocalImagePreviewCell else {
+            return
+        }
+        
+        let hud = ZLProgressHUD.show(toast: .processing)
+        let imageView = cell.preview.imageView
+        let renderer = UIGraphicsImageRenderer(bounds: imageView.bounds)
+        let image = renderer.image { context in
+            imageView.layer.render(in: context.cgContext)
+        }
+        ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] suc, _ in
+            hud.hide()
+            if !suc {
+                showAlertView(localLanguageTextValue(.saveImageError), self)
+            }
+        }
+    }
 }
