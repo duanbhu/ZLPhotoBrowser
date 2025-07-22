@@ -799,7 +799,7 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
     }
     
     /// 保存图片（连同加在imageView上的水印部分）
-    public func saveImageWithOthers() {
+    public func saveImageWithOthers(complete: @escaping (_ isSuccess: Bool) -> ()) {
         guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) else {
             return
         }
@@ -823,6 +823,7 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             if error != nil {
                 showAlertView(localLanguageTextValue(.saveImageError), self)
             }
+            complete(error == nil)
         }
     }
 }
