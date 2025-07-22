@@ -68,7 +68,7 @@ public class ZLImagePreviewController: UIViewController {
     /// 在图片上加载额外的元素
     open var otherLoaderBlock: OtherLoaderBlock?
     
-    lazy var collectionView: UICollectionView = {
+    public lazy var collectionView: UICollectionView = {
         let layout = ZLCollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         
