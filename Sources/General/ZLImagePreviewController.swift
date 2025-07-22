@@ -44,7 +44,7 @@ public typealias OtherLoaderBlock = ( _ imageView: UIImageView) -> Void
     @objc optional func imagePreviewController(_ controller: ZLImagePreviewController, didScroll collectionView: UICollectionView)
 }
 
-public class ZLImagePreviewController: UIViewController {
+open class ZLImagePreviewController: UIViewController {
     static let colItemSpacing: CGFloat = 40
     
     static let selPhotoPreviewH: CGFloat = 100
@@ -95,7 +95,7 @@ public class ZLImagePreviewController: UIViewController {
     
     private let navViewAlpha = 0.95
     
-    private lazy var navView: UIView = {
+    open lazy var navView: UIView = {
         let view = UIView()
         view.backgroundColor = .zl.navBarColorOfPreviewVC
         view.alpha = navViewAlpha
