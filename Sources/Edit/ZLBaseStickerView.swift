@@ -142,7 +142,7 @@ class ZLBaseStickerView: UIView, UIGestureRecognizerDelegate {
         self.originScale = originScale
         self.originAngle = originAngle
         self.originFrame = originFrame
-        self.maxGesScale = 4 / originScale
+        maxGesScale = 4 / originScale
         super.init(frame: .zero)
         
         self.gesScale = gesScale
@@ -220,7 +220,6 @@ class ZLBaseStickerView: UIView, UIGestureRecognizerDelegate {
     @objc func tapAction(_ ges: UITapGestureRecognizer) {
         guard gesIsEnabled else { return }
         
-        superview?.bringSubviewToFront(self)
         delegate?.stickerDidTap(self)
         startTimer()
     }
@@ -301,7 +300,6 @@ class ZLBaseStickerView: UIView, UIGestureRecognizerDelegate {
             onOperation = true
             cleanTimer()
             borderView.layer.borderColor = UIColor.white.cgColor
-            superview?.bringSubviewToFront(self)
             delegate?.stickerBeginOperation(self)
         } else if !isOn, onOperation {
             onOperation = false

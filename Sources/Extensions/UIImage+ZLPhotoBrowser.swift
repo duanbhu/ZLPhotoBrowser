@@ -339,11 +339,11 @@ public extension ZLPhotoBrowserWrapper where Base: UIImage {
             return nil
         }
         
-        UIGraphicsBeginImageContextWithOptions(size, false, scale ?? base.scale)
-        base.draw(in: CGRect(origin: .zero, size: size))
-        let temp = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        return temp
+        return UIGraphicsImageRenderer.zl.renderImage(size: size) { format in
+            format.scale = scale ?? base.scale
+        } imageActions: { _ in
+            base.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
     
     /// Resize image. Processing speed is better than resize(:) method
@@ -406,7 +406,7 @@ public extension ZLPhotoBrowserWrapper where Base: UIImage {
         return ciImage
     }
     
-    func clipImage(angle: CGFloat, editRect: CGRect, isCircle: Bool) -> UIImage? {
+    func clipImage(angle: CGFloat, editRect: CGRect, isCircle: Bool) -> UIImage {
         let a = ((Int(angle) % 360) - 360) % 360
         var newImage: UIImage = base
         if a == -90 {
@@ -416,22 +416,24 @@ public extension ZLPhotoBrowserWrapper where Base: UIImage {
         } else if a == -270 {
             newImage = rotate(orientation: .right)
         }
-        guard editRect.size != newImage.size else {
+        guard isCircle || editRect.size != newImage.size else {
             return newImage
         }
+        
         let origin = CGPoint(x: -editRect.minX, y: -editRect.minY)
-        UIGraphicsBeginImageContextWithOptions(editRect.size, false, newImage.scale)
-        let context = UIGraphicsGetCurrentContext()
-        if isCircle {
-            context?.addEllipse(in: CGRect(origin: .zero, size: editRect.size))
-            context?.clip()
+        
+        let temp = UIGraphicsImageRenderer.zl.renderImage(size: editRect.size) { format in
+            format.scale = newImage.scale
+        } imageActions: { context in
+            if isCircle {
+                context.addEllipse(in: CGRect(origin: .zero, size: editRect.size))
+                context.clip()
+            }
+            newImage.draw(at: origin)
         }
-        newImage.draw(at: origin)
-        let temp = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        guard let cgi = temp?.cgImage else {
-            return temp
-        }
+        
+        guard let cgi = temp.cgImage else { return temp }
+        
         let clipImage = UIImage(cgImage: cgi, scale: newImage.scale, orientation: .up)
         return clipImage
     }
@@ -496,16 +498,15 @@ public extension ZLPhotoBrowserWrapper where Base: UIImage {
         return image
     }
     
-    func fillColor(_ color: UIColor) -> UIImage? {
-        UIGraphicsBeginImageContextWithOptions(base.size, false, base.scale)
-        let drawRect = CGRect(x: 0, y: 0, width: base.zl.width, height: base.zl.height)
-        color.setFill()
-        UIRectFill(drawRect)
-        base.draw(in: drawRect, blendMode: .destinationIn, alpha: 1)
-
-        let tintedImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        return tintedImage
+    func fillColor(_ color: UIColor) -> UIImage {
+        return UIGraphicsImageRenderer.zl.renderImage(size: base.size) { format in
+            format.scale = base.scale
+        } imageActions: { _ in
+            let drawRect = CGRect(origin: .zero, size: base.size)
+            color.setFill()
+            UIRectFill(drawRect)
+            base.draw(in: drawRect, blendMode: .destinationIn, alpha: 1)
+        }
 
     }
 }

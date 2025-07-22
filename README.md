@@ -29,6 +29,7 @@ Detailed usage of `Swift` and `OC`, please refer to [Wiki](https://github.com/lo
 If you only want to use the image edit feature, please move to [ZLImageEditor](https://github.com/longitachi/ZLImageEditor).
 
 ### Features
+- [x] Support SwiftUI.
 - [x] Portrait and landscape.
 - [x] Two framework style.
 - [x] Preview selection (Support drag and drop).
@@ -53,7 +54,7 @@ If you only want to use the image edit feature, please move to [ZLImageEditor](h
 ### Requirements
  * iOS 10.0
  * Swift 5.x
- * Xcode 13.x
+ * Xcode 14.x
  
 ### Usage
  - Preview selection
@@ -91,28 +92,38 @@ If you only want to use the image edit feature, please move to [ZLImageEditor](h
 ### Change Log
 > [More logs](https://github.com/longitachi/ZLPhotoBrowser/blob/master/CHANGELOG.md)
 ```
-● 4.4.5
+● 4.6.0.1
   Add:
-    Can set whether the shadow is always displayed when cropping the picture
+    Support SwiftUI.
+    Support for locked output orientation in custom camera.
+    Optimize the playback experience of album videos and online videos.
+    Add will-capture-block for customizable capture actions.
+    Replace ZLPhotoPreviewSheet with ZLPhotoPicker. The permission of ZLPhotoPreviewSheet will be changed to private later.
+    Enhance the text sticker feature by adding text outline and shadow effects.
   Fix:
-    When there are too many photos, the album may crash when opened.
-    Crash on simulator version 14.0.1.
-    In the image editor where the sticker position was incorrect after the image was rotated.
-● 4.4.4
+    Fixed the bug that the time of automatically stopping recording is incorrect when clicking to record a video.
+    Fix the issue where the width and height calculations of some videos are inaccurate when previewing online videos.
+● 4.5.8
   Add:
-    Support downloading video data from iCloud before selecting a video.
-    Makes the drawn curves smoother when editing images.
+    Add video stabilization mode to camera configuration.
   Fix:
-    Fix a bug that may fail to save videos stored on iCloud.
-● 4.4.3.1, 4.4.3.2 - 4.4.3 Patch
-  Fix:
-    Delete some time-consuming codes to improve the image loading speed of the thumbnail interface.
-    Disable TextView when user ends editing.
+    Fix video recording with both torch-on and wide cameras.
+    Fixed the problem of freezing caused by calculating the frame when previewing network videos.
+    Fix the memory leak issue in the ZLEditImageViewController interface.
+    After the initial request for album permissions is denied, the permission guidance alert will no longer be displayed.
+    Correct eraser misalignment after image cropping.
+● 4.5.7
+  Add:
+    Custom camera supports tap-to-record mode.
+    Custom camera supports wide-angle lenses on iOS 13 and above.
+    Custom camera allows adding a custom overlay view.
+    Video editing controller adds a callback block for canceling edits.
+    Added `ZLImagePreviewControllerDelegate` protocol to receive event callbacks in ZLImagePreviewController.
 ...
 ```
 
 ### Languages
-🇨🇳 Chinese, 🇺🇸 English, 🇯🇵 Japanese, 🇫🇷 French, 🇩🇪 German, 🇷🇺 Russian, 🇻🇳 Vietnamese, 🇰🇷 Korean, 🇲🇾 Malay, 🇮🇹 Italian, 🇮🇩 Indonesian, 🇪🇸 Spanish, 🇵🇹 Portuguese, 🇹🇷 Turkish, 🇸🇦 Arabic.
+🇨🇳 Chinese, 🇺🇸 English, 🇯🇵 Japanese, 🇫🇷 French, 🇩🇪 German, 🇷🇺 Russian, 🇻🇳 Vietnamese, 🇰🇷 Korean, 🇲🇾 Malay, 🇮🇹 Italian, 🇮🇩 Indonesian, 🇪🇸 Spanish, 🇵🇹 Portuguese, 🇹🇷 Turkish, 🇸🇦 Arabic, 🇳🇱 Dutch.
 
 ### Installation
 There are four ways to use ZLPhotoBrowser in your project:
@@ -162,8 +173,8 @@ If you get an error like `Building universal frameworks with common architecture
 Rebuild with --use-xcframeworks to create an xcframework bundle instead.` [Click this link](https://github.com/Carthage/Carthage/blob/master/Documentation/Xcode12Workaround.md).
 
 #### Swift Package Manager
-1. Select File > Swift Packages > Add Package Dependency. Enter https://github.com/longitachi/ZLPhotoBrowser.git in the "Choose Package Repository" dialog.
-2. In the next page, specify the version resolving rule as "Up to Next Major" with "4.0.9" as its earliest version.
+1. Select File > Add Packages. Enter https://github.com/longitachi/ZLPhotoBrowser.git in the "Choose Package Repository" dialog.
+2. In the next page, specify the version resolving rule as "Up to Next Major" with "4.6.0.1" as its earliest version.
 3. After Xcode checking out the source and resolving the version, you can choose the "ZLPhotoBrowser" library and add it to your app target.
 
 ### Support

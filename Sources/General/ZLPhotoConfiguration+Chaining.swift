@@ -59,6 +59,12 @@ public extension ZLPhotoConfiguration {
     }
     
     @discardableResult
+    func initialIndex(_ index: Int) -> ZLPhotoConfiguration {
+        initialIndex = index
+        return self
+    }
+    
+    @discardableResult
     func allowSelectImage(_ value: Bool) -> ZLPhotoConfiguration {
         allowSelectImage = value
         return self
@@ -125,12 +131,6 @@ public extension ZLPhotoConfiguration {
     }
     
     @discardableResult
-    func showClipDirectlyIfOnlyHasClipTool(_ value: Bool) -> ZLPhotoConfiguration {
-        showClipDirectlyIfOnlyHasClipTool = value
-        return self
-    }
-    
-    @discardableResult
     func saveNewImageAfterEdit(_ value: Bool) -> ZLPhotoConfiguration {
         saveNewImageAfterEdit = value
         return self
@@ -187,6 +187,18 @@ public extension ZLPhotoConfiguration {
     @discardableResult
     func showSelectCountOnDoneBtn(_ value: Bool) -> ZLPhotoConfiguration {
         showSelectCountOnDoneBtn = value
+        return self
+    }
+    
+    @discardableResult
+    func showSelectBtnWhenSingleSelect(_ value: Bool) -> ZLPhotoConfiguration {
+        showSelectBtnWhenSingleSelect = value
+        return self
+    }
+    
+    @discardableResult
+    func showSelectedIndex(_ value: Bool) -> ZLPhotoConfiguration {
+        showSelectedIndex = value
         return self
     }
     
@@ -257,14 +269,8 @@ public extension ZLPhotoConfiguration {
     }
     
     @discardableResult
-    func showAddPhotoButton(_ value: Bool) -> ZLPhotoConfiguration {
-        showAddPhotoButton = value
-        return self
-    }
-    
-    @discardableResult
-    func showEnterSettingTips(_ value: Bool) -> ZLPhotoConfiguration {
-        showEnterSettingTips = value
+    func canEnterCamera(_ block: (() -> Bool)?) -> ZLPhotoConfiguration {
+        canEnterCamera = block
         return self
     }
     
@@ -275,7 +281,7 @@ public extension ZLPhotoConfiguration {
     }
     
     @discardableResult
-    func gifPlayBlock(_ block: ((UIImageView, Data, [AnyHashable: Any]?) -> Void)?) -> ZLPhotoConfiguration {
+    func gifPlayBlock(_ block: ((UIImageView, Data, PHAsset, [AnyHashable: Any]?) -> Void)?) -> ZLPhotoConfiguration {
         gifPlayBlock = block
         return self
     }
@@ -295,6 +301,12 @@ public extension ZLPhotoConfiguration {
     @discardableResult
     func noAuthorityCallback(_ callback: ((ZLNoAuthorityType) -> Void)?) -> ZLPhotoConfiguration {
         noAuthorityCallback = callback
+        return self
+    }
+    
+    @discardableResult
+    func customAlertWhenNoAuthority(_ callback: ((ZLNoAuthorityType) -> Void)?) -> ZLPhotoConfiguration {
+        customAlertWhenNoAuthority = callback
         return self
     }
     

@@ -30,45 +30,64 @@ import Photos
 @objcMembers
 public class ZLPhotoManager: NSObject {
     /// Save image to album.
-    public class func saveImageToAlbum(image: UIImage, completion: ((Bool, PHAsset?) -> Void)?) {
-        let status = PHPhotoLibrary.authorizationStatus()
-        
+    public class func saveImageToAlbum(image: UIImage, completion: ((Error?, PHAsset?) -> Void)?) {
+        saveImageObjToAlbum(obj: image, completion: completion)
+    }
+    
+    public class func saveImageDataToAlbum(data: Data, completion: ((Error?, PHAsset?) -> Void)?) {
+        saveImageObjToAlbum(obj: data as AnyObject, completion: completion)
+    }
+    
+    private class func saveImageObjToAlbum(obj: AnyObject, completion: ((Error?, PHAsset?) -> Void)?) {
+        let status = PHPhotoLibrary.zl.authStatus(for: .addOnly)
         if status == .denied || status == .restricted {
-            completion?(false, nil)
+            completion?(NSError.noWriteAuthError, nil)
             return
         }
+        
         var placeholderAsset: PHObjectPlaceholder?
-        let completionHandler: ((Bool, Error?) -> Void) = { suc, _ in
-            ZLMainAsync {
-                if suc {
-                    let asset = self.getAsset(from: placeholderAsset?.localIdentifier)
-                    completion?(suc, asset)
-                } else {
-                    completion?(false, nil)
+        let completionHandler: ((Bool, Error?) -> Void) = { suc, error in
+            if suc, error == nil {
+                let asset = self.getAsset(from: placeholderAsset?.localIdentifier)
+                ZLMainAsync {
+                    completion?(nil, asset)
+                }
+            } else {
+                ZLMainAsync {
+                    completion?(error, nil)
                 }
             }
         }
-
-        if image.zl.hasAlphaChannel(), let data = image.pngData() {
+        
+        if let image = obj as? UIImage {
+            if image.zl.hasAlphaChannel(), let data = image.pngData() {
+                PHPhotoLibrary.shared().performChanges({
+                    let newAssetRequest = PHAssetCreationRequest.forAsset()
+                    newAssetRequest.addResource(with: .photo, data: data, options: nil)
+                    placeholderAsset = newAssetRequest.placeholderForCreatedAsset
+                }, completionHandler: completionHandler)
+            } else {
+                PHPhotoLibrary.shared().performChanges({
+                    let newAssetRequest = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    placeholderAsset = newAssetRequest.placeholderForCreatedAsset
+                }, completionHandler: completionHandler)
+            }
+        } else if let data = obj as? Data {
             PHPhotoLibrary.shared().performChanges({
                 let newAssetRequest = PHAssetCreationRequest.forAsset()
                 newAssetRequest.addResource(with: .photo, data: data, options: nil)
                 placeholderAsset = newAssetRequest.placeholderForCreatedAsset
             }, completionHandler: completionHandler)
         } else {
-            PHPhotoLibrary.shared().performChanges({
-                let newAssetRequest = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                placeholderAsset = newAssetRequest.placeholderForCreatedAsset
-            }, completionHandler: completionHandler)
+            completion?(NSError(message: "Error params type"), nil)
         }
     }
     
     /// Save video to album.
-    public class func saveVideoToAlbum(url: URL, completion: ((Bool, PHAsset?) -> Void)?) {
-        let status = PHPhotoLibrary.authorizationStatus()
-        
+    public class func saveVideoToAlbum(url: URL, completion: ((Error?, PHAsset?) -> Void)?) {
+        let status = PHPhotoLibrary.zl.authStatus(for: .addOnly)
         if status == .denied || status == .restricted {
-            completion?(false, nil)
+            completion?(NSError.noWriteAuthError, nil)
             return
         }
         
@@ -76,13 +95,15 @@ public class ZLPhotoManager: NSObject {
         PHPhotoLibrary.shared().performChanges({
             let newAssetRequest = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
             placeholderAsset = newAssetRequest?.placeholderForCreatedAsset
-        }) { suc, _ in
-            ZLMainAsync {
-                if suc {
-                    let asset = self.getAsset(from: placeholderAsset?.localIdentifier)
-                    completion?(suc, asset)
-                } else {
-                    completion?(false, nil)
+        }) { suc, error in
+            if suc, error == nil {
+                let asset = self.getAsset(from: placeholderAsset?.localIdentifier)
+                ZLMainAsync {
+                    completion?(nil, asset)
+                }
+            } else {
+                ZLMainAsync {
+                    completion?(error, nil)
                 }
             }
         }
@@ -98,12 +119,34 @@ public class ZLPhotoManager: NSObject {
     }
     
     /// Fetch photos from result.
-    public class func fetchPhoto(in result: PHFetchResult<PHAsset>, ascending: Bool, allowSelectImage: Bool, allowSelectVideo: Bool, limitCount: Int = .max) -> [ZLPhotoModel] {
+    public class func fetchPhoto(
+        in result: PHFetchResult<PHAsset>,
+        ascending: Bool,
+        allowSelectImage: Bool,
+        allowSelectVideo: Bool,
+        limitCount: Int = .max
+    ) -> [ZLPhotoModel] {
+        let indexSet = ascending ? IndexSet(0..<min(result.count, limitCount)) : IndexSet(max(0, result.count - limitCount)..<result.count)
+        return fetchPhoto(
+            in: result,
+            ascending: ascending,
+            allowSelectImage: allowSelectImage,
+            allowSelectVideo: allowSelectImage,
+            indexSet: indexSet
+        )
+    }
+    
+    public class func fetchPhoto(
+        in result: PHFetchResult<PHAsset>,
+        ascending: Bool,
+        allowSelectImage: Bool,
+        allowSelectVideo: Bool,
+        indexSet: IndexSet
+    ) -> [ZLPhotoModel] {
         var models: [ZLPhotoModel] = []
         let option: NSEnumerationOptions = ascending ? .init(rawValue: 0) : .reverse
-        var count = 1
         
-        result.enumerateObjects(options: option) { asset, _, stop in
+        result.enumerateObjects(at: indexSet, options: option) { asset, _, _ in
             let m = ZLPhotoModel(asset: asset)
             
             if m.type == .image, !allowSelectImage {
@@ -112,12 +155,8 @@ public class ZLPhotoManager: NSObject {
             if m.type == .video, !allowSelectVideo {
                 return
             }
-            if count == limitCount {
-                stop.pointee = true
-            }
             
             models.append(m)
-            count += 1
         }
         
         return models
@@ -133,15 +172,27 @@ public class ZLPhotoManager: NSObject {
             option.predicate = NSPredicate(format: "mediaType == %ld", PHAssetMediaType.image.rawValue)
         }
         
-        let smartAlbums = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil) as! PHFetchResult<PHCollection>
-        let albums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil) as! PHFetchResult<PHCollection>
-        let streamAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumMyPhotoStream, options: nil) as! PHFetchResult<PHCollection>
-        let syncedAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumSyncedAlbum, options: nil) as! PHFetchResult<PHCollection>
-        let sharedAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumCloudShared, options: nil) as! PHFetchResult<PHCollection>
-        let arr = [smartAlbums, albums, streamAlbums, syncedAlbums, sharedAlbums]
+        var arr: [PHFetchResult<PHCollection>?] = []
+        
+        let smartAlbums = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .any, options: nil) as? PHFetchResult<PHCollection>
+        arr.append(smartAlbums)
+        
+        if #available(iOS 18.0, *) {
+            let ablums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil) as? PHFetchResult<PHCollection>
+            arr.append(ablums)
+        } else {
+            let albums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil) as? PHFetchResult<PHCollection>
+            let streamAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumMyPhotoStream, options: nil) as? PHFetchResult<PHCollection>
+            let syncedAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumSyncedAlbum, options: nil) as? PHFetchResult<PHCollection>
+            let sharedAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumCloudShared, options: nil) as? PHFetchResult<PHCollection>
+            
+            arr.append(contentsOf: [albums, streamAlbums, syncedAlbums, sharedAlbums])
+        }
+        
+        let results = arr.compactMap { $0 }
         
         var albumList: [ZLAlbumListModel] = []
-        arr.forEach { album in
+        results.forEach { album in
             album.enumerateObjects { collection, _, _ in
                 guard let collection = collection as? PHAssetCollection else { return }
                 if collection.assetCollectionSubtype == .smartAlbumAllHidden {
@@ -283,11 +334,21 @@ public class ZLPhotoManager: NSObject {
             }
         }
         
-        return PHImageManager.default().requestImageData(for: asset, options: option) { data, _, _, info in
+        let resultHandler: (Data?, [AnyHashable: Any]?) -> Void = { data, info in
             let cancel = info?[PHImageCancelledKey] as? Bool ?? false
             let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool ?? false)
             if !cancel, let data = data {
                 completion(data, info, isDegraded)
+            }
+        }
+        
+        if #available(iOS 13.0, *) {
+            return PHImageManager.default().requestImageDataAndOrientation(for: asset, options: option) { data, _, _, info in
+                resultHandler(data, info)
+            }
+        } else {
+            return PHImageManager.default().requestImageData(for: asset, options: option) { data, _, _, info in
+                resultHandler(data, info)
             }
         }
     }
@@ -430,9 +491,11 @@ public class ZLPhotoManager: NSObject {
             return
         }
         
-        let pointer = UnsafeMutablePointer<PHImageRequestID>.allocate(capacity: MemoryLayout<Int32>.stride)
-        pointer.pointee = PHInvalidImageRequestID
+        var requestID = PHInvalidImageRequestID
         var canceled = false
+        
+        // fix warning：'requestID' mutated after capture by sendable closure
+        let currID = { requestID }
         
         var timer: Timer? = .scheduledTimer(
             withTimeInterval: ZLPhotoUIConfiguration.default().timeout,
@@ -440,7 +503,7 @@ public class ZLPhotoManager: NSObject {
         ) { timer in
             timer.invalidate()
             canceled = true
-            PHImageManager.default().cancelImageRequest(pointer.pointee)
+            PHImageManager.default().cancelImageRequest(currID())
             
             completion(NSError.timeoutError)
         }
@@ -456,7 +519,9 @@ public class ZLPhotoManager: NSObject {
                 completion(error)
             } else if !isDegraded {
                 cleanTimer()
-                PHAssetResourceManager.default().writeData(for: resource, toFile: fileUrl, options: nil) { error in
+                let option = PHAssetResourceRequestOptions()
+                option.isNetworkAccessAllowed = true
+                PHAssetResourceManager.default().writeData(for: resource, toFile: fileUrl, options: option) { error in
                     ZLMainAsync {
                         completion(error)
                     }
@@ -465,7 +530,7 @@ public class ZLPhotoManager: NSObject {
         }
         
         if asset.mediaType == .video {
-            pointer.pointee = fetchVideo(for: asset) { _, error, _, _ in
+            requestID = fetchVideo(for: asset) { _, error, _, _ in
                 write(true, error)
             } completion: { _, info, isDegraded in
                 guard !canceled else { return }
@@ -474,7 +539,7 @@ public class ZLPhotoManager: NSObject {
                 write(isDegraded, error)
             }
         } else if asset.zl.isInCloud {
-            pointer.pointee = fetchOriginalImageData(for: asset) { progress, error, _, _ in
+            requestID = fetchOriginalImageData(for: asset) { _, error, _, _ in
                 write(true, error)
             } completion: { _, info, isDegraded in
                 guard !canceled else { return }
@@ -490,8 +555,8 @@ public class ZLPhotoManager: NSObject {
 
 /// Authority related.
 public extension ZLPhotoManager {
-    class func hasPhotoLibratyAuthority() -> Bool {
-        return PHPhotoLibrary.authorizationStatus() == .authorized
+    class func hasPhotoLibratyReadWriteAuthority() -> Bool {
+        return PHPhotoLibrary.zl.authStatus(for: .readWrite) == .authorized
     }
     
     class func hasCameraAuthority() -> Bool {

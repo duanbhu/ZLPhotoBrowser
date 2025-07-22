@@ -44,7 +44,7 @@ enum ZLLayout {
 }
 
 func markSelected(source: inout [ZLPhotoModel], selected: inout [ZLPhotoModel]) {
-    guard selected.count > 0 else {
+    guard !selected.isEmpty else {
         return
     }
     
@@ -104,7 +104,11 @@ func deviceSafeAreaInsets() -> UIEdgeInsets {
 }
 
 func deviceIsFringeScreen() -> Bool {
-    return deviceSafeAreaInsets().top > 0
+    if UIApplication.shared.statusBarOrientation.isLandscape {
+        return deviceSafeAreaInsets().left > 0 || deviceSafeAreaInsets().right > 0
+    } else {
+        return deviceSafeAreaInsets().top > 20
+    }
 }
 
 func isSmallScreen() -> Bool {
@@ -161,7 +165,7 @@ func canAddModel(_ model: ZLPhotoModel, currentSelectCount: Int, sender: UIViewC
     
     if currentSelectCount > 0,
        !config.allowMixSelect,
-       model.type == .video{
+       model.type == .video {
         return false
     }
     
@@ -185,7 +189,7 @@ func canAddModel(_ model: ZLPhotoModel, currentSelectCount: Int, sender: UIViewC
         return false
     }
     
-    guard (config.minSelectVideoDataSize > 0 || config.maxSelectVideoDataSize != .greatestFiniteMagnitude),
+    guard config.minSelectVideoDataSize > 0 || config.maxSelectVideoDataSize != .greatestFiniteMagnitude,
           let size = model.dataSize else {
         return true
     }
@@ -250,7 +254,7 @@ func videoIsMeetRequirements(model: ZLPhotoModel) -> Bool {
         return false
     }
     
-    if (config.minSelectVideoDataSize > 0 || config.maxSelectVideoDataSize != .greatestFiniteMagnitude),
+    if config.minSelectVideoDataSize > 0 || config.maxSelectVideoDataSize != .greatestFiniteMagnitude,
        let dataSize = model.dataSize,
        !(config.minSelectVideoDataSize...config.maxSelectVideoDataSize ~= dataSize) {
         return false
@@ -276,11 +280,11 @@ func ZLMainAsync(after: TimeInterval = 0, handler: @escaping (() -> Void)) {
 }
 
 func zl_debugPrint(_ message: Any...) {
-    message.forEach { debugPrint($0) }
+//    message.forEach { debugPrint($0) }
 }
 
-func zlLoggerInDebug(_ lastMessage: @autoclosure () -> String, file: StaticString = #file, line: UInt = #line) {
+func zlLoggerInDebug(_ lastMessage: @autoclosure () -> String, file: StaticString = #file, line: UInt = #line, funcName: String = #function) {
     #if DEBUG
-        print("\(file):\(line): \(lastMessage())")
+        print("file: \(file), line: \(line), func: \(funcName), message: \(lastMessage())")
     #endif
 }

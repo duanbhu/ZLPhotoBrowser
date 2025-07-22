@@ -28,8 +28,27 @@ import UIKit
 import Photos
 import PhotosUI
 
-class ZLPreviewBaseCell: UICollectionViewCell {
+class ZLPreviewBaseCell: UICollectionViewCell, UIGestureRecognizerDelegate {
+    lazy var longGes: UILongPressGestureRecognizer = {
+        let ges = UILongPressGestureRecognizer(target: self, action: #selector(longPressAction(_:)))
+        ges.minimumPressDuration = 0.5
+        ges.delegate = self
+        return ges
+    }()
+    
     var singleTapBlock: (() -> Void)?
+    
+    var longPressBlock: (() -> Void)? {
+        didSet {
+            if longPressBlock != nil {
+                if longGes.view == nil {
+                    contentView.addGestureRecognizer(longGes)
+                }
+            } else {
+                removeGestureRecognizer(longGes)
+            }
+        }
+    }
     
     var currentImage: UIImage? { nil }
     
@@ -117,6 +136,16 @@ class ZLPreviewBaseCell: UICollectionViewCell {
     func animateImageFrame(convertTo view: UIView) -> CGRect {
         return .zero
     }
+    
+    @objc func longPressAction(_ ges: UILongPressGestureRecognizer) {
+        if ges.state == .began {
+            longPressBlock?()
+        }
+    }
+    
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        currentImage != nil
+    }
 }
 
 // MARK: local image preview cell
@@ -141,8 +170,6 @@ class ZLLocalImagePreviewCell: ZLPreviewBaseCell {
         }
     }
     
-    var longPressBlock: (() -> Void)?
-    
     deinit {
         zl_debugPrint("ZLLocalImagePreviewCell deinit")
     }
@@ -164,24 +191,15 @@ class ZLLocalImagePreviewCell: ZLPreviewBaseCell {
     
     private func setupUI() {
         contentView.addSubview(preview)
-        
-        let longGes = UILongPressGestureRecognizer(target: self, action: #selector(longPressAction(_:)))
-        longGes.minimumPressDuration = 0.5
-        addGestureRecognizer(longGes)
     }
     
     override func didEndDisplaying() {
         preview.scrollView.zoomScale = 1
     }
     
-    @objc func longPressAction(_ ges: UILongPressGestureRecognizer) {
-        guard currentImage != nil else {
-            return
-        }
-        
-        if ges.state == .began {
-            longPressBlock?()
-        }
+    override func animateImageFrame(convertTo view: UIView) -> CGRect {
+        let rect = preview.scrollView.convert(preview.containerView.frame, to: self)
+        return convert(rect, to: view)
     }
 }
 
@@ -222,6 +240,11 @@ class ZLNetImagePreviewCell: ZLLocalImagePreviewCell {
     override func didEndDisplaying() {
         progressView.isHidden = true
         preview.scrollView.zoomScale = 1
+    }
+    
+    override func animateImageFrame(convertTo view: UIView) -> CGRect {
+        let rect = preview.scrollView.convert(preview.containerView.frame, to: self)
+        return convert(rect, to: view)
     }
 }
 
@@ -376,6 +399,7 @@ class ZLLivePhotoPreviewCell: ZLPreviewBaseCell {
     lazy var livePhotoView: PHLivePhotoView = {
         let view = PHLivePhotoView()
         view.contentMode = .scaleAspectFit
+        view.playbackGestureRecognizer.isEnabled = false
         return view
     }()
     
@@ -418,6 +442,12 @@ class ZLLivePhotoPreviewCell: ZLPreviewBaseCell {
     private func setupUI() {
         contentView.addSubview(livePhotoView)
         contentView.addSubview(imageView)
+        
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(singleTapAction(_:)))
+        singleTap.require(toFail: longGes)
+        contentView.addGestureRecognizer(singleTap)
+        
+        contentView.addGestureRecognizer(longGes)
     }
     
     private func loadNormalImage() {
@@ -463,6 +493,22 @@ class ZLLivePhotoPreviewCell: ZLPreviewBaseCell {
                 self.startPlayLivePhoto()
             }
         })
+    }
+    
+    @objc private func singleTapAction(_ tap: UITapGestureRecognizer) {
+        singleTapBlock?()
+    }
+    
+    override func longPressAction(_ ges: UILongPressGestureRecognizer) {
+        if ges.state == .began {
+            livePhotoView.startPlayback(with: .full)
+        } else if ges.state == .cancelled || ges.state == .ended {
+            livePhotoView.stopPlayback()
+        }
+    }
+    
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
@@ -529,10 +575,8 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
     
     private var fetchVideoDone = false
     
-    private let operationQueue = DispatchQueue(label: "com.ZLPhotoBrowser.ZLVideoPreviewCell")
-    
     var isPlaying: Bool {
-        if player != nil, player?.rate != 0 {
+        if let player, player.rate != 0 {
             return true
         }
         return false
@@ -546,6 +590,7 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
     
     deinit {
         cancelDownloadVideo()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         zl_debugPrint("ZLVideoPreviewCell deinit")
     }
     
@@ -573,9 +618,7 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
     }
     
     override func previewVCScroll() {
-        if player != nil, player?.rate != 0 {
-            pausePlayer(seekToZero: false)
-        }
+        pausePlayer(seekToZero: false)
     }
     
     override func willDisplay() {
@@ -672,17 +715,23 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
         playerLayer?.frame = playerView.bounds
         playerView.layer.insertSublayer(playerLayer!, at: 0)
         
-        NotificationCenter.default.addObserver(self, selector: #selector(playFinish), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+        NotificationCenter.default.addObserver(self, selector: #selector(playFinish), name: AVPlayerItem.didPlayToEndTimeNotification, object: player?.currentItem)
     }
     
     @objc private func playBtnClick() {
         let currentTime = player?.currentItem?.currentTime()
         let duration = player?.currentItem?.duration
-        if player?.rate == 0 {
+        if !isPlaying {
             if currentTime?.value == duration?.value {
-                player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+                if #available(iOS 11.0, *) {
+                    player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1), completionHandler: nil)
+                } else {
+                    player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+                }
             }
             imageView.isHidden = true
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
             player?.play()
             playBtn.setImage(nil, for: .normal)
             singleTapBlock?()
@@ -692,26 +741,32 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
     }
     
     @objc private func playFinish() {
-        pausePlayer(seekToZero: true)
+        pausePlayer(seekToZero: true, ignorePlayStatus: true)
     }
     
     @objc private func appWillResignActive() {
-        if player != nil, player?.rate != 0 {
-            pausePlayer(seekToZero: false)
-        }
+        pausePlayer(seekToZero: false)
     }
     
-    private func pausePlayer(seekToZero: Bool) {
+    /// 暂停播放器
+    /// - Parameters:
+    ///   - seekToZero: 是否seek到0秒
+    ///   - ignorePlayStatus: 是否忽略当前播放器播放状态（
+    /// - Note: 由于`iOS16`后，收到`AVPlayerItem.didPlayToEndTimeNotification`通知后，`player`的`rate`值已经是`0`，所以会被`guard isPlaying else { return }`拦截。所以加了`ignorePlayStatus`参数
+    private func pausePlayer(seekToZero: Bool, ignorePlayStatus: Bool = false) {
+        guard isPlaying || ignorePlayStatus else { return }
+        
         player?.pause()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+        
         if seekToZero {
             player?.seek(to: .zero)
         }
+        
         playBtn.setImage(.zl.getImage("zl_playVideo"), for: .normal)
         singleTapBlock?()
-        
-        operationQueue.async {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
     }
     
     private func cancelDownloadVideo() {
@@ -725,7 +780,17 @@ class ZLVideoPreviewCell: ZLPreviewBaseCell {
 class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
     private var player: AVPlayer?
     
-    private var playerLayer: AVPlayerLayer?
+    var playerLayer: AVPlayerLayer?
+    
+    var playerView = UIView()
+    
+    /// 承载用户设置的封面图
+    lazy var coverImageView = {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFill
+        view.clipsToBounds = true
+        return view
+    }()
     
     private lazy var playBtn: UIButton = {
         let btn = UIButton(type: .custom)
@@ -734,22 +799,44 @@ class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
         return btn
     }()
     
-    private lazy var singleTapGes: UITapGestureRecognizer = {
+    lazy var singleTapGes: UITapGestureRecognizer = {
         let ges = UITapGestureRecognizer()
         ges.addTarget(self, action: #selector(playBtnClick))
         return ges
     }()
     
     var isPlaying: Bool {
-        if player != nil, player?.rate != 0 {
+        if let player, player.rate != 0 {
             return true
         }
         return false
     }
     
-    private let operationQueue = DispatchQueue(label: "com.ZLPhotoBrowser.ZLNetVideoPreviewCell")
+    private var videoURLString = ""
+    
+    private var videoSizeCache: [String: CGSize] = [:]
+    
+    override var currentImage: UIImage? {
+        guard let currentItem = player?.currentItem else { return nil }
+                
+        // 获取当前播放时间
+        let currentTime = currentItem.currentTime()
+        
+        // 使用AVAssetImageGenerator来获取当前帧的图像
+        let imageGenerator = AVAssetImageGenerator(asset: currentItem.asset)
+        imageGenerator.appliesPreferredTrackTransform = true
+        
+        do {
+            let cgImage = try imageGenerator.copyCGImage(at: currentTime, actualTime: nil)
+            let image = UIImage(cgImage: cgImage)
+            return image
+        } catch {
+            return nil
+        }
+    }
     
     deinit {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         zl_debugPrint("ZLNetVideoPreviewCell deinit")
     }
     
@@ -766,16 +853,31 @@ class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         
-        playerLayer?.frame = bounds
+        if let size = videoSizeCache[videoURLString] {
+            let frame = calculateVideoFrame(forVideoSize: size)
+            playerView.frame = frame
+            playerLayer?.frame = CGRect(origin: .zero, size: frame.size)
+        }
+        
         playBtn.frame = CGRect(origin: .zero, size: CGSize(width: 50, height: 50))
         playBtn.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
     
     override func didEndDisplaying() {
-        player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+        if #available(iOS 11.0, *) {
+            player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1), completionHandler: nil)
+        } else {
+            player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+        }
+    }
+    
+    override func animateImageFrame(convertTo view: UIView) -> CGRect {
+        return convert(playerView.frame, to: view)
     }
     
     private func setupUI() {
+        contentView.addSubview(playerView)
+        contentView.addSubview(coverImageView)
         contentView.addSubview(playBtn)
         contentView.addGestureRecognizer(singleTapGes)
         
@@ -787,9 +889,17 @@ class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
         let duration = player?.currentItem?.duration
         if player?.rate == 0 {
             if currentTime?.value == duration?.value {
-                player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+                if #available(iOS 11.0, *) {
+                    player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1), completionHandler: nil)
+                } else {
+                    player?.currentItem?.seek(to: CMTimeMake(value: 0, timescale: 1))
+                }
             }
+            
+            coverImageView.isHidden = true
             player?.play()
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
             playBtn.setImage(nil, for: .normal)
             singleTapBlock?()
         } else {
@@ -798,38 +908,53 @@ class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
     }
     
     @objc private func playFinish() {
-        pausePlayer(seekToZero: true)
+        coverImageView.isHidden = false
+        pausePlayer(seekToZero: true, ignorePlayStatus: true)
     }
     
     @objc private func appWillResignActive() {
-        if player != nil, player?.rate != 0 {
-            pausePlayer(seekToZero: false)
-        }
+        pausePlayer(seekToZero: false)
+    }
+    
+    override func willDisplay() {
+        coverImageView.isHidden = false
     }
     
     override func previewVCScroll() {
-        if player != nil, player?.rate != 0 {
-            pausePlayer(seekToZero: false)
-        }
+        pausePlayer(seekToZero: false)
     }
     
-    private func pausePlayer(seekToZero: Bool) {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+    
+    /// 暂停播放器
+    /// - Parameters:
+    ///   - seekToZero: 是否seek到0秒
+    ///   - ignorePlayStatus: 是否忽略当前播放器播放状态（
+    /// - Note: 由于`iOS16`后，收到`AVPlayerItem.didPlayToEndTimeNotification`通知后，`player`的`rate`值已经是`0`，所以会被`guard isPlaying else { return }`拦截。所以加了`ignorePlayStatus`参数
+    private func pausePlayer(seekToZero: Bool, ignorePlayStatus: Bool = false) {
+        guard isPlaying || ignorePlayStatus else { return }
+        
         player?.pause()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
         if seekToZero {
             player?.seek(to: .zero)
         }
+        
         playBtn.setImage(.zl.getImage("zl_playVideo"), for: .normal)
         singleTapBlock?()
-        
-        operationQueue.async {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
     }
     
-    func configureCell(videoUrl: URL, httpHeader: [String: Any]?) {
+    func configureCell(videoUrl: URL, httpHeader: [String: Any]?, coverImageBlock: (() -> UIImage?)?) {
+        videoURLString = videoUrl.absoluteString
         player = nil
         playerLayer?.removeFromSuperlayer()
         playerLayer = nil
+        coverImageView.frame = .zero
+        coverImageView.image = coverImageBlock?()
         
         var options: [String: Any] = [:]
         options["AVURLAssetHTTPHeaderFieldsKey"] = httpHeader
@@ -837,9 +962,91 @@ class ZLNetVideoPreviewCell: ZLPreviewBaseCell {
         let item = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: item)
         playerLayer = AVPlayerLayer(player: player)
+        playerLayer?.videoGravity = .resizeAspect
+        playerView.frame = bounds
         playerLayer?.frame = bounds
-        layer.insertSublayer(playerLayer!, at: 0)
-        NotificationCenter.default.addObserver(self, selector: #selector(playFinish), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+        calculatePlayerFrame(for: item) { [weak self] rect in
+            self?.playerView.frame = rect
+            self?.coverImageView.frame = rect
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self?.playerLayer?.frame = CGRect(origin: .zero, size: rect.size)
+            CATransaction.commit()
+        }
+        playerView.layer.insertSublayer(playerLayer!, at: 0)
+        NotificationCenter.default.addObserver(self, selector: #selector(playFinish), name: AVPlayerItem.didPlayToEndTimeNotification, object: player?.currentItem)
+    }
+    
+    private func calculatePlayerFrame(for item: AVPlayerItem, completion: ((CGRect) -> Void)?) {
+        if let size = videoSizeCache[videoURLString] {
+            completion?(calculateVideoFrame(forVideoSize: size))
+            return
+        }
+        
+        guard item.asset is AVURLAsset else {
+            completion?(self.bounds)
+            return
+        }
+        
+        item.asset.loadValuesAsynchronously(forKeys: ["tracks"]) {
+            let status = item.asset.statusOfValue(forKey: "tracks", error: nil)
+            guard status == .loaded else {
+                ZLMainAsync {
+                    completion?(self.bounds)
+                }
+                return
+            }
+            
+            let videoTracks = item.asset.tracks(withMediaType: .video)
+            
+            if let videoTrack = videoTracks.first {
+                let size = self.correctVideoSize(for: videoTrack)
+                self.videoSizeCache[self.videoURLString] = size
+                
+                ZLMainAsync {
+                    completion?(self.calculateVideoFrame(forVideoSize: size))
+                }
+            } else {
+                ZLMainAsync {
+                    completion?(self.bounds)
+                }
+            }
+        }
+    }
+    
+    /// 计算视频实际宽高
+    private func correctVideoSize(for track: AVAssetTrack) -> CGSize {
+        let size = track.naturalSize
+        let transform = track.preferredTransform
+        
+        // 获取视频的旋转角度
+        let angle = atan2(transform.b, transform.a) * (180 / .pi)
+        if angle == 90 || angle == -90 {
+            // 竖屏视频（宽高需要对调）
+            return CGSize(width: abs(size.height), height: abs(size.width))
+        } else {
+            // 横屏视频（宽高不变）
+            return CGSize(width: abs(size.width), height: abs(size.height))
+        }
+    }
+    
+    private func calculateVideoFrame(forVideoSize size: CGSize) -> CGRect {
+        let cellWidth = zl.width
+        let cellHeight = zl.height
+        
+        let videoWHRatio = size.width / size.height
+        let cellWHRatio = cellWidth / cellHeight
+        
+        let videoRect: CGRect
+        if videoWHRatio > cellWHRatio {
+            let videoH = cellWidth / videoWHRatio
+            videoRect = CGRect(x: 0, y: (cellHeight - videoH) / 2, width: cellWidth, height: videoH)
+        } else {
+            let videoW = cellHeight * videoWHRatio
+            videoRect = CGRect(x: (cellWidth - videoW) / 2, y: 0, width: videoW, height: cellHeight)
+        }
+        
+        return videoRect
     }
 }
 
@@ -1050,7 +1257,7 @@ class ZLPreviewView: UIView {
             if !isDegraded {
                 self.fetchGifDone = true
                 if let gifPlayBlock = ZLPhotoConfiguration.default().gifPlayBlock {
-                    gifPlayBlock(self.imageView, data, info)
+                    gifPlayBlock(self.imageView, data, self.model.asset, info)
                 } else {
                     self.imageView.image = UIImage.zl.animateGifImage(data: data)
                 }

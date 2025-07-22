@@ -28,7 +28,6 @@ import UIKit
 import Photos
 
 public class ZLAlbumListModel: NSObject {
-    
     public let title: String
     
     public var count: Int {
@@ -49,11 +48,25 @@ public class ZLAlbumListModel: NSObject {
     
     public var models: [ZLPhotoModel] = []
     
+    private var currentLoadIndex: Int
+    
+    // 根据最小公倍数计算出一个接近pageSize的值
+    private var onceLoadCount: Int { Int(ceil(Double(ZLPhotoUIConfiguration.default().pageSize) / Double(lcmColumns))) * lcmColumns }
+    
+    // 竖屏列数和横屏列数的最小公倍数
+    private var lcmColumns = 12
+    
+    var columnCounts = (portrait: 4, landscape: 6) {
+        didSet {
+            lcmColumns = lcm(columnCounts.portrait, columnCounts.landscape)
+        }
+    }
+    
     // 暂未用到
     private var selectedModels: [ZLPhotoModel] = []
     
     // 暂未用到
-    private var selectedCount: Int = 0
+    private var selectedCount = 0
     
     public init(
         title: String,
@@ -67,17 +80,51 @@ public class ZLAlbumListModel: NSObject {
         self.collection = collection
         self.option = option
         self.isCameraRoll = isCameraRoll
+        currentLoadIndex = result.count
     }
     
-    public func refetchPhotos() {
+    private func gcd(_ a: Int, _ b: Int) -> Int {
+        var a = a, b = b
+        while b != 0 {
+            (a, b) = (b, a % b)
+        }
+        return a
+    }
+
+    private func lcm(_ a: Int, _ b: Int) -> Int {
+        return a * b / gcd(a, b)
+    }
+    
+    @discardableResult
+    public func preloadPhotos(loadAll: Bool = false) -> [ZLPhotoModel] {
+        guard currentLoadIndex > 0 else { return [] }
+        
+        var loadCount = onceLoadCount
+        let isFirstLoad = currentLoadIndex == result.count
+        if isFirstLoad {
+            // mod横竖屏列数的最小公倍数，并在第一次加载时候把余数给加载了，从而使后续分页加载的数据均为整数行
+            let mod = result.count % lcmColumns
+            loadCount = onceLoadCount + mod
+        }
+        
+        let minIndex = loadAll ? 0 : max(0, currentLoadIndex - loadCount)
+        let indexSet = IndexSet(minIndex..<currentLoadIndex)
+        currentLoadIndex = minIndex
         let models = ZLPhotoManager.fetchPhoto(
             in: result,
             ascending: ZLPhotoUIConfiguration.default().sortAscending,
             allowSelectImage: ZLPhotoConfiguration.default().allowSelectImage,
-            allowSelectVideo: ZLPhotoConfiguration.default().allowSelectVideo
+            allowSelectVideo: ZLPhotoConfiguration.default().allowSelectVideo,
+            indexSet: indexSet
         )
-        self.models.removeAll()
-        self.models.append(contentsOf: models)
+        
+        if ZLPhotoUIConfiguration.default().sortAscending {
+            self.models.insert(contentsOf: models, at: 0)
+        } else {
+            self.models.append(contentsOf: models)
+        }
+        
+        return models
     }
     
     func refreshResult() {
@@ -85,12 +132,14 @@ public class ZLAlbumListModel: NSObject {
     }
 }
 
-extension ZLAlbumListModel {
-    
-    static func ==(lhs: ZLAlbumListModel, rhs: ZLAlbumListModel) -> Bool {
-        return lhs.title == rhs.title &&
-               lhs.count == rhs.count &&
-               lhs.headImageAsset?.localIdentifier == rhs.headImageAsset?.localIdentifier
+public extension ZLAlbumListModel {
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let object = object as? ZLAlbumListModel else {
+            return false
+        }
+        
+        return title == object.title &&
+            count == object.count &&
+            headImageAsset?.localIdentifier == object.headImageAsset?.localIdentifier
     }
-    
 }

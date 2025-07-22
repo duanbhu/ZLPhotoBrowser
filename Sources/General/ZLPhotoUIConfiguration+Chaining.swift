@@ -83,6 +83,18 @@ public extension ZLPhotoUIConfiguration {
         return self
     }
     
+    @discardableResult
+    func allowPageLoading(_ value: Bool) -> ZLPhotoUIConfiguration {
+        allowPageLoading = value
+        return self
+    }
+    
+    @discardableResult
+    func pageSize(_ value: Int) -> ZLPhotoUIConfiguration {
+        pageSize = value
+        return self
+    }
+    
     /// - Note: This property is ignored when using columnCountBlock.
     @discardableResult
     func columnCount(_ count: Int) -> ZLPhotoUIConfiguration {
@@ -145,12 +157,6 @@ public extension ZLPhotoUIConfiguration {
     }
     
     @discardableResult
-    func showSelectBtnWhenSingleSelect(_ value: Bool) -> ZLPhotoUIConfiguration {
-        showSelectBtnWhenSingleSelect = value
-        return self
-    }
-    
-    @discardableResult
     func showSelectedMask(_ value: Bool) -> ZLPhotoUIConfiguration {
         showSelectedMask = value
         return self
@@ -169,14 +175,20 @@ public extension ZLPhotoUIConfiguration {
     }
     
     @discardableResult
-    func showSelectedIndex(_ value: Bool) -> ZLPhotoUIConfiguration {
-        showSelectedIndex = value
+    func showSelectedPhotoPreview(_ value: Bool) -> ZLPhotoUIConfiguration {
+        showSelectedPhotoPreview = value
         return self
     }
     
     @discardableResult
-    func showSelectedPhotoPreview(_ value: Bool) -> ZLPhotoUIConfiguration {
-        showSelectedPhotoPreview = value
+    func showAddPhotoButton(_ value: Bool) -> ZLPhotoUIConfiguration {
+        showAddPhotoButton = value
+        return self
+    }
+    
+    @discardableResult
+    func showEnterSettingTips(_ value: Bool) -> ZLPhotoUIConfiguration {
+        showEnterSettingTips = value
         return self
     }
     
@@ -343,6 +355,18 @@ public extension ZLPhotoUIConfiguration {
     }
     
     @discardableResult
+    func noLibraryAuthTitleAndDescColor(_ color: UIColor) -> ZLPhotoUIConfiguration {
+        noLibraryAuthTitleAndDescColor = color
+        return self
+    }
+    
+    @discardableResult
+    func noLibraryAuthGotoSettingBtnTitleColor(_ color: UIColor) -> ZLPhotoUIConfiguration {
+        noLibraryAuthGotoSettingBtnTitleColor = color
+        return self
+    }
+    
+    @discardableResult
     func bottomToolViewBgColor(_ color: UIColor) -> ZLPhotoUIConfiguration {
         bottomToolViewBgColor = color
         return self
@@ -351,6 +375,18 @@ public extension ZLPhotoUIConfiguration {
     @discardableResult
     func bottomToolViewBgColorOfPreviewVC(_ color: UIColor) -> ZLPhotoUIConfiguration {
         bottomToolViewBgColorOfPreviewVC = color
+        return self
+    }
+    
+    @discardableResult
+    func originalSizeLabelTextColor(_ color: UIColor) -> ZLPhotoUIConfiguration {
+        originalSizeLabelTextColor = color
+        return self
+    }
+    
+    @discardableResult
+    func originalSizeLabelTextColorOfPreviewVC(_ color: UIColor) -> ZLPhotoUIConfiguration {
+        originalSizeLabelTextColorOfPreviewVC = color
         return self
     }
     

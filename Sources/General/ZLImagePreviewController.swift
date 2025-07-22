@@ -34,7 +34,15 @@ import Photos
 
 public typealias ZLImageLoaderBlock = (_ url: URL, _ imageView: UIImageView, _ progress: @escaping (CGFloat) -> Void, _ complete: @escaping () -> Void) -> Void
 
-open class ZLImagePreviewController: UIViewController {
+@objc public protocol ZLImagePreviewControllerDelegate: AnyObject {
+    @objc optional func imagePreviewController(_ controller: ZLImagePreviewController, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath)
+    
+    @objc optional func imagePreviewController(_ controller: ZLImagePreviewController, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath)
+    
+    @objc optional func imagePreviewController(_ controller: ZLImagePreviewController, didScroll collectionView: UICollectionView)
+}
+
+public class ZLImagePreviewController: UIViewController {
     static let colItemSpacing: CGFloat = 40
     
     static let selPhotoPreviewH: CGFloat = 100
@@ -51,11 +59,11 @@ open class ZLImagePreviewController: UIViewController {
     
     private let showBottomView: Bool
 
-    private var currentIndex: Int
+    public private(set) var currentIndex: Int
     
     private var indexBeforOrientationChanged: Int
     
-    public private(set) lazy var collectionView: UICollectionView = {
+    lazy var collectionView: UICollectionView = {
         let layout = ZLCollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         
@@ -65,6 +73,9 @@ open class ZLImagePreviewController: UIViewController {
         view.delegate = self
         view.isPagingEnabled = true
         view.showsHorizontalScrollIndicator = false
+        if #available(iOS 11.0, *) {
+            view.contentInsetAdjustmentBehavior = .never
+        }
         
         ZLPhotoPreviewCell.zl.register(view)
         ZLGifPreviewCell.zl.register(view)
@@ -77,9 +88,12 @@ open class ZLImagePreviewController: UIViewController {
         return view
     }()
     
-    public private(set) lazy var navView: UIView = {
+    private let navViewAlpha = 0.95
+    
+    private lazy var navView: UIView = {
         let view = UIView()
         view.backgroundColor = .zl.navBarColorOfPreviewVC
+        view.alpha = navViewAlpha
         return view
     }()
     
@@ -141,23 +155,40 @@ open class ZLImagePreviewController: UIViewController {
     
     private var hideNavView = false
     
+    private var dismissInteractiveTransition: ZLImagePreviewDismissInteractiveTransition?
+    
     private var orientation: UIInterfaceOrientation = .unknown
     
-    @objc public var longPressBlock: ((ZLImagePreviewController?, UIImage?, Int) -> Void)?
+    private var imageRequestID: PHImageRequestID?
+    
+    private var urlDownloadTask: URLSessionDownloadTask?
+    
+    @objc public var delegate: ZLImagePreviewControllerDelegate?
+    
+    @objc public var longPressBlock: ((_ vc: ZLImagePreviewController?, _ index: Int) -> Void)?
     
     @objc public var doneBlock: (([Any]) -> Void)?
     
     @objc public var videoHttpHeader: [String: Any]?
     
+    @objc public var netVideoCoverImageBlock: ((_ url: URL) -> UIImage?)?
+    
+    /// 下拉返回时，需要外界提供一个动画结束时的rect
+    public var dismissTransitionFrame: ((_ index: Int) -> CGRect?)?
+    
     override open var prefersStatusBarHidden: Bool {
-        return !ZLPhotoUIConfiguration.default().showStatusBarInPreviewInterface
+        !ZLPhotoUIConfiguration.default().showStatusBarInPreviewInterface
     }
     
+    override public var prefersHomeIndicatorAutoHidden: Bool { true }
+    
     override open var preferredStatusBarStyle: UIStatusBarStyle {
-        return ZLPhotoUIConfiguration.default().statusBarStyle
+        ZLPhotoUIConfiguration.default().statusBarStyle
     }
     
     deinit {
+        cancelImageRequest()
+        urlDownloadTask?.cancel()
         zl_debugPrint("ZLImagePreviewController deinit")
     }
     
@@ -196,6 +227,7 @@ open class ZLImagePreviewController: UIViewController {
         super.viewDidLoad()
 
         setupUI()
+        addDismissInteractiveTransition()
         resetSubViewStatus()
     }
     
@@ -206,10 +238,9 @@ open class ZLImagePreviewController: UIViewController {
     
     override open func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        transitioningDelegate = self
         
-        guard isFirstAppear else {
-            return
-        }
+        guard isFirstAppear else { return }
         isFirstAppear = false
         reloadCurrentCell()
     }
@@ -261,16 +292,12 @@ open class ZLImagePreviewController: UIViewController {
                 ),
                 animated: false
             )
-            collectionView.performBatchUpdates({
-                self.collectionView.setContentOffset(
-                    CGPoint(
-                        x: (self.view.frame.width + ZLPhotoPreviewController.colItemSpacing) * CGFloat(self.indexBeforOrientationChanged),
-                        y: 0
-                    ),
-                    animated: false
-                )
-            })
         }
+    }
+    
+    override public func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        collectionView.collectionViewLayout.invalidateLayout()
     }
     
     private func reloadCurrentCell() {
@@ -287,9 +314,7 @@ open class ZLImagePreviewController: UIViewController {
     
     private func setupUI() {
         view.backgroundColor = .zl.previewVCBgColor
-        if #available(iOS 11.0, *) {
-            collectionView.contentInsetAdjustmentBehavior = .never
-        } else {
+        if #unavailable(iOS 11.0) {
             automaticallyAdjustsScrollViewInsets = false
         }
         
@@ -313,6 +338,65 @@ open class ZLImagePreviewController: UIViewController {
         
         bottomView.addSubview(doneBtn)
         view.bringSubviewToFront(navView)
+    }
+    
+    private func addDismissInteractiveTransition() {
+        dismissInteractiveTransition = ZLImagePreviewDismissInteractiveTransition(viewController: self)
+        dismissInteractiveTransition?.shouldStartTransition = { [weak self] point -> Bool in
+            guard let `self` = self else { return false }
+            
+            if !self.hideNavView, self.navView.frame.contains(point) ||
+                self.bottomView.frame.contains(point) {
+                return false
+            }
+            
+            guard self.collectionView.cellForItem(at: IndexPath(row: self.currentIndex, section: 0)) != nil else {
+                return false
+            }
+            
+            return true
+        }
+        dismissInteractiveTransition?.startTransition = { [weak self] in
+            guard let `self` = self else { return }
+            
+            UIView.animate(withDuration: 0.25) {
+                self.navView.alpha = 0
+                self.bottomView.alpha = 0
+            }
+            
+            guard let cell = self.collectionView.cellForItem(at: IndexPath(row: self.currentIndex, section: 0)) else {
+                return
+            }
+            
+            if let cell = cell as? ZLLivePhotoPreviewCell {
+                cell.livePhotoView.stopPlayback()
+            } else if let cell = cell as? ZLGifPreviewCell {
+                cell.pauseGif()
+            }
+        }
+        dismissInteractiveTransition?.cancelTransition = { [weak self] in
+            guard let `self` = self else { return }
+            
+            let cell = self.collectionView.cellForItem(at: IndexPath(row: self.currentIndex, section: 0))
+            
+            if let cell = cell as? ZLNetVideoPreviewCell {
+                self.hideNavView = cell.isPlaying
+            } else {
+                self.hideNavView = false
+            }
+            
+            self.navView.isHidden = self.hideNavView
+            self.bottomView.isHidden = self.hideNavView
+            
+            UIView.animate(withDuration: 0.5) {
+                self.navView.alpha = self.navViewAlpha
+                self.bottomView.alpha = 1
+            }
+            
+            if let cell = cell as? ZLGifPreviewCell {
+                cell.resumeGif()
+            }
+        }
     }
     
     private func resetSubViewStatus() {
@@ -400,6 +484,8 @@ open class ZLImagePreviewController: UIViewController {
         let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0))
         if let cell = cell as? ZLVideoPreviewCell, cell.isPlaying {
             hideNavView = true
+        } else if let cell = cell as? ZLNetVideoPreviewCell, cell.isPlaying {
+            hideNavView = true
         }
         navView.isHidden = hideNavView
         if showBottomView {
@@ -408,12 +494,25 @@ open class ZLImagePreviewController: UIViewController {
     }
 }
 
-// scroll view delegate
+extension ZLImagePreviewController: UIViewControllerTransitioningDelegate {
+    public func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+        return dismissInteractiveTransition?.interactive == true ? ZLPhotoPreviewAnimatedTransition() : nil
+    }
+    
+    public func interactionControllerForDismissal(using animator: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
+        return dismissInteractiveTransition?.interactive == true ? dismissInteractiveTransition : nil
+    }
+}
+
+// MARK: scroll view delegate
+
 public extension ZLImagePreviewController {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView == collectionView else {
             return
         }
+        
+        delegate?.imagePreviewController?(self, didScroll: collectionView)
         
         NotificationCenter.default.post(name: ZLPhotoPreviewController.previewVCScrollNotification, object: nil)
         let offset = scrollView.contentOffset
@@ -471,10 +570,6 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             if config.allowSelectGif, model.type == .gif {
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLGifPreviewCell.zl.identifier, for: indexPath) as! ZLGifPreviewCell
                 
-                cell.singleTapBlock = { [weak self] in
-                    self?.tapPreviewCell()
-                }
-                
                 cell.model = model
                 baseCell = cell
             } else if config.allowSelectLivePhoto, model.type == .livePhoto {
@@ -483,6 +578,12 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
                 cell.model = model
                 
                 baseCell = cell
+                baseCell.singleTapBlock = { [weak self] in
+                    self?.tapPreviewCell()
+                }
+                
+                // livePhoto 不添加长按手势，因为与播放手势冲突
+                return baseCell
             } else if config.allowSelectVideo, model.type == .video {
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLVideoPreviewCell.zl.identifier, for: indexPath) as! ZLVideoPreviewCell
                 
@@ -492,16 +593,10 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             } else {
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLPhotoPreviewCell.zl.identifier, for: indexPath) as! ZLPhotoPreviewCell
 
-                cell.singleTapBlock = { [weak self] in
-                    self?.tapPreviewCell()
-                }
-
                 cell.model = model
 
                 baseCell = cell
             }
-            
-            return baseCell
         } else if let image = obj as? UIImage {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLLocalImagePreviewCell.zl.identifier, for: indexPath) as! ZLLocalImagePreviewCell
             
@@ -528,7 +623,9 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             } else {
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLNetVideoPreviewCell.zl.identifier, for: indexPath) as! ZLNetVideoPreviewCell
                 
-                cell.configureCell(videoUrl: url, httpHeader: videoHttpHeader)
+                cell.configureCell(videoUrl: url, httpHeader: videoHttpHeader) { [weak self] in
+                    self?.netVideoCoverImageBlock?(url)
+                }
                 
                 baseCell = cell
             }
@@ -544,9 +641,9 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             self?.tapPreviewCell()
         }
         
-        (baseCell as? ZLLocalImagePreviewCell)?.longPressBlock = { [weak self, weak baseCell] in
+        baseCell.longPressBlock = { [weak self] in
             if let callback = self?.longPressBlock {
-                callback(self, baseCell?.currentImage, indexPath.row)
+                callback(self, indexPath.row)
             } else {
                 self?.showSaveImageAlert()
             }
@@ -555,24 +652,133 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
         return baseCell
     }
     
+    public func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        delegate?.imagePreviewController?(self, willDisplay: cell, forItemAt: indexPath)
+        (cell as? ZLPreviewBaseCell)?.willDisplay()
+    }
+    
     public func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        if let cell = cell as? ZLPreviewBaseCell {
-            cell.didEndDisplaying()
-        }
+        delegate?.imagePreviewController?(self, didEndDisplaying: cell, forItemAt: indexPath)
+        (cell as? ZLPreviewBaseCell)?.didEndDisplaying()
     }
     
     private func showSaveImageAlert() {
         func saveImage() {
-            guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) as? ZLLocalImagePreviewCell, let image = cell.currentImage else {
+            guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) else {
                 return
             }
             
-            let hud = ZLProgressHUD.show(toast: .processing)
-            ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] suc, _ in
-                hud.hide()
-                if !suc {
-                    showAlertView(localLanguageTextValue(.saveImageError), self)
+            if cell is ZLLocalImagePreviewCell,
+               let url = datas[currentIndex] as? URL {
+                let hud = ZLProgressHUD.show(toast: .processing)
+                urlDownloadTask?.cancel()
+                urlDownloadTask = URLSession.shared.downloadTask(with: url) { localURL, _, error in
+                    ZLMainAsync {
+                        zl_debugPrint("---- localURL: \(String(describing: localURL))")
+                        guard let localURL,
+                              error == nil,
+                              let data = try? Data(contentsOf: localURL) else {
+                            hud.hide()
+                            showAlertView(localLanguageTextValue(.saveVideoError), self)
+                            return
+                        }
+                        
+                        ZLPhotoManager.saveImageDataToAlbum(data: data) { error, _ in
+                            hud.hide()
+                            if error != nil {
+                                showAlertView(localLanguageTextValue(.saveImageError), self)
+                            }
+                        }
+                    }
                 }
+                
+                urlDownloadTask?.resume()
+                return
+            }
+            
+            if cell is ZLNetVideoPreviewCell,
+               let url = datas[currentIndex] as? URL {
+                let hud = ZLProgressHUD.show(toast: .processing)
+                urlDownloadTask?.cancel()
+                urlDownloadTask = URLSession.shared.downloadTask(with: url) { localURL, _, error in
+                    ZLMainAsync {
+                        zl_debugPrint("---- localURL: \(String(describing: localURL))")
+                        guard let localURL, error == nil else {
+                            hud.hide()
+                            showAlertView(localLanguageTextValue(.saveVideoError), self)
+                            return
+                        }
+                        
+                        let fileExt = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+                        let destURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                            .appendingPathComponent(UUID().uuidString)
+                            .appendingPathExtension(fileExt)
+                        do {
+                            try FileManager.default.moveItem(at: localURL, to: destURL)
+                            
+                            ZLPhotoManager.saveVideoToAlbum(url: destURL) { error, _ in
+                                hud.hide()
+                                try? FileManager.default.removeItem(at: destURL)
+                                if error != nil {
+                                    showAlertView(localLanguageTextValue(.saveVideoError), self)
+                                }
+                            }
+                        } catch {
+                            showAlertView(localLanguageTextValue(.saveVideoError), self)
+                        }
+                    }
+                }
+                
+                urlDownloadTask?.resume()
+                return
+            }
+            
+            if (cell is ZLPhotoPreviewCell || cell is ZLGifPreviewCell),
+               let asset = datas[currentIndex] as? PHAsset {
+                let hud = ZLProgressHUD.show(toast: .processing, timeout: ZLPhotoUIConfiguration.default().timeout)
+                hud.timeoutBlock = { [weak self] in
+                    self?.cancelImageRequest()
+                }
+                imageRequestID = ZLPhotoManager.fetchOriginalImageData(for: asset, completion: { [weak self] data, info, isDegraded in
+                    guard let `self` = self else { return }
+                    
+                    if info?[PHImageErrorKey] as? Error != nil {
+                        hud.hide()
+                        showAlertView(localLanguageTextValue(.saveImageError), self)
+                    } else if !isDegraded {
+                        ZLPhotoManager.saveImageDataToAlbum(data: data) { error, _ in
+                            hud.hide()
+                            if error != nil {
+                                showAlertView(localLanguageTextValue(.saveImageError), self)
+                            }
+                        }
+                    }
+                })
+                
+                return
+            }
+            
+            if cell is ZLVideoPreviewCell,
+               let asset = datas[currentIndex] as? PHAsset {
+                let hud = ZLProgressHUD.show(toast: .processing)
+                let fileURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("mp4")
+                ZLPhotoManager.saveAsset(asset, toFile: fileURL) { error in
+                    if error != nil {
+                        showAlertView(localLanguageTextValue(.saveVideoError), self)
+                    } else {
+                        ZLPhotoManager.saveVideoToAlbum(url: fileURL) { error, _ in
+                            hud.hide()
+                            try? FileManager.default.removeItem(at: fileURL)
+                            if error != nil {
+                                showAlertView(localLanguageTextValue(.saveVideoError), self)
+                            }
+                        }
+                    }
+                }
+                
+                return
             }
         }
         
@@ -580,7 +786,13 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
             saveImage()
         }
         let cancelAction = ZLCustomAlertAction(title: localLanguageTextValue(.cancel), style: .cancel, handler: nil)
-        showAlertController(title: nil, message: "", style: .actionSheet, actions: [saveAction, cancelAction], sender: self)
+        showAlertController(title: nil, message: nil, style: .actionSheet, actions: [saveAction, cancelAction], sender: self)
+    }
+    
+    private func cancelImageRequest() {
+        guard let imageRequestID else { return }
+        
+        PHImageManager.default().cancelImageRequest(imageRequestID)
     }
     
     public func saveImageWithOthers() {
@@ -593,12 +805,6 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
         let renderer = UIGraphicsImageRenderer(bounds: imageView.bounds)
         let image = renderer.image { context in
             imageView.layer.render(in: context.cgContext)
-        }
-        ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] suc, _ in
-            hud.hide()
-            if !suc {
-                showAlertView(localLanguageTextValue(.saveImageError), self)
-            }
         }
     }
 }

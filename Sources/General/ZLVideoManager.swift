@@ -46,9 +46,9 @@ public class ZLVideoManager: NSObject {
     }
     
     /// 没有针对不同分辨率视频做处理，仅用于处理相机拍照的视频
-    @objc public class func mergeVideos(fileUrls: [URL], completion: @escaping ((URL?, Error?) -> Void)) {
+    @objc public class func mergeVideos(fileURLs: [URL], completion: @escaping ((URL?, Error?) -> Void)) {
         let composition = AVMutableComposition()
-        let assets = fileUrls.map { AVURLAsset(url: $0) }
+        let assets = fileURLs.map { AVURLAsset(url: $0) }
         
         var insertTime: CMTime = .zero
         var assetVideoTracks: [AVAssetTrack] = []
@@ -102,20 +102,42 @@ public class ZLVideoManager: NSObject {
             return
         }
         
-        let outputUrl = URL(fileURLWithPath: ZLVideoManager.getVideoExportFilePath())
-        exportSession.outputURL = outputUrl
+        let outputFileType = ZLPhotoConfiguration.default().cameraConfiguration.videoExportType.avFileType
+        let outputURL = URL(fileURLWithPath: ZLVideoManager.getVideoExportFilePath())
+        exportSession.outputURL = outputURL
         exportSession.shouldOptimizeForNetworkUse = true
-        exportSession.outputFileType = ZLPhotoConfiguration.default().cameraConfiguration.videoExportType.avFileType
+        exportSession.outputFileType = outputFileType
         exportSession.videoComposition = videoComposition
-        exportSession.exportAsynchronously(completionHandler: {
-            let suc = exportSession.status == .completed
-            if exportSession.status == .failed {
-                zl_debugPrint("ZLPhotoBrowser: video merge failed:  \(exportSession.error?.localizedDescription ?? "")")
+        
+        if #available(iOS 18, *) {
+            Task {
+                do {
+                    try await exportSession.export(to: outputURL, as: outputFileType)
+                    
+                    ZLMainAsync {
+                        let suc = exportSession.status == .completed
+                        if exportSession.status == .failed {
+                            zl_debugPrint("ZLPhotoBrowser: video export failed: \(exportSession.error?.localizedDescription ?? "")")
+                        }
+                        completion(suc ? outputURL : nil, exportSession.error)
+                    }
+                } catch {
+                    completion(nil, error)
+                }
             }
-            ZLMainAsync {
-                completion(suc ? outputUrl : nil, exportSession.error)
+        } else {
+            let completionHandler: () -> Void = { [weak exportSession] in
+                ZLMainAsync {
+                    let suc = exportSession?.status == .completed
+                    if exportSession?.status == .failed {
+                        zl_debugPrint("ZLPhotoBrowser: video merge failed:  \(exportSession?.error?.localizedDescription ?? "")")
+                    }
+                    completion(suc ? outputURL : nil, exportSession?.error)
+                }
             }
-        })
+            
+            exportSession.exportAsynchronously(completionHandler: completionHandler)
+        }
     }
     
     private static func getNaturalSize(videoTrack: AVAssetTrack) -> CGSize {
@@ -185,25 +207,51 @@ public extension ZLVideoManager {
         }
     }
     
-    @objc class func exportVideo(for asset: AVAsset, range: CMTimeRange = CMTimeRange(start: .zero, duration: .positiveInfinity), exportType: ZLVideoManager.ExportType = .mov, presetName: String = AVAssetExportPresetMediumQuality, complete: @escaping ((URL?, Error?) -> Void)) {
-        let outputUrl = URL(fileURLWithPath: getVideoExportFilePath(format: exportType.format))
+    @objc class func exportVideo(
+        for asset: AVAsset,
+        range: CMTimeRange = CMTimeRange(start: .zero, duration: .positiveInfinity),
+        exportType: ZLVideoManager.ExportType = .mov,
+        presetName: String = AVAssetExportPresetMediumQuality,
+        complete: @escaping ((URL?, Error?) -> Void)
+    ) {
+        let outputURL = URL(fileURLWithPath: getVideoExportFilePath(format: exportType.format))
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
             complete(nil, NSError.videoExportError)
             return
         }
-        exportSession.outputURL = outputUrl
+        exportSession.outputURL = outputURL
         exportSession.outputFileType = exportType.avFileType
         exportSession.timeRange = range
         
-        exportSession.exportAsynchronously(completionHandler: {
-            let suc = exportSession.status == .completed
-            if exportSession.status == .failed {
-                zl_debugPrint("ZLPhotoBrowser: video export failed: \(exportSession.error?.localizedDescription ?? "")")
+        if #available(iOS 18, *) {
+            Task {
+                do {
+                    try await exportSession.export(to: outputURL, as: exportType.avFileType)
+                    
+                    ZLMainAsync {
+                        let suc = exportSession.status == .completed
+                        if exportSession.status == .failed {
+                            zl_debugPrint("ZLPhotoBrowser: video export failed: \(exportSession.error?.localizedDescription ?? "")")
+                        }
+                        complete(suc ? outputURL : nil, exportSession.error)
+                    }
+                } catch {
+                    complete(nil, error)
+                }
             }
-            ZLMainAsync {
-                complete(suc ? outputUrl : nil, exportSession.error)
+        } else {
+            let completionHandler: () -> Void = { [weak exportSession] in
+                ZLMainAsync {
+                    let suc = exportSession?.status == .completed
+                    if exportSession?.status == .failed {
+                        zl_debugPrint("ZLPhotoBrowser: video export failed: \(exportSession?.error?.localizedDescription ?? "")")
+                    }
+                    complete(suc ? outputURL : nil, exportSession?.error)
+                }
             }
-        })
+            
+            exportSession.exportAsynchronously(completionHandler: completionHandler)
+        }
     }
 }
 

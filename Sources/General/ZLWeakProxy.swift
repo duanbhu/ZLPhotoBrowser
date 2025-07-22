@@ -2,7 +2,7 @@
 //  ZLWeakProxy.swift
 //  ZLPhotoBrowser
 //
-//  Created by long on 2021/3/10.
+//  Created by long on 2024/3/6.
 //
 //  Copyright (c) 2020 Long Zhang <495181165@qq.com>
 //
@@ -24,10 +24,11 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //  THE SOFTWARE.
 
+#if SWIFT_PACKAGE
+
 import UIKit
 
 class ZLWeakProxy: NSObject {
-    
     private weak var target: NSObjectProtocol?
     
     init(target: NSObjectProtocol) {
@@ -35,7 +36,7 @@ class ZLWeakProxy: NSObject {
         super.init()
     }
     
-    class func proxy(withTarget target: NSObjectProtocol) -> ZLWeakProxy {
+    class func proxy(target: NSObjectProtocol) -> ZLWeakProxy {
         return ZLWeakProxy(target: target)
     }
     
@@ -46,5 +47,6 @@ class ZLWeakProxy: NSObject {
     override func responds(to aSelector: Selector!) -> Bool {
         return target?.responds(to: aSelector) ?? false
     }
-    
 }
+
+#endif

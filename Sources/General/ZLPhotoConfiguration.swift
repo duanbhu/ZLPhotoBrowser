@@ -89,6 +89,17 @@ public class ZLPhotoConfiguration: NSObject {
     /// Preview selection max preview count, if the value is zero, only show `Camera`, `Album`, `Cancel` buttons. Defaults to 20.
     public var maxPreviewCount = 20
     
+    private var pri_initialIndex = 1
+    /// The index of the first selected image, and the indices of subsequently selected images are incremented based on this value. Defaults to 1.
+    public var initialIndex: Int {
+        get {
+            max(pri_initialIndex, 1)
+        }
+        set {
+            pri_initialIndex = newValue
+        }
+    }
+    
     /// If set to false, gif and livephoto cannot be selected either. Defaults to true.
     public var allowSelectImage = true
     
@@ -151,9 +162,6 @@ public class ZLPhotoConfiguration: NSObject {
     /// Just like the Wechat-Timeline selection style. If you want to crop the video after select thumbnail under allowMixSelect = true, please use **editAfterSelectThumbnailImage**.
     public var cropVideoAfterSelectThumbnail = true
     
-    /// If image edit tools only has clip and this property is true. When you click edit, the cropping interface (i.e. ZLClipImageViewController) will be displayed. Defaults to false.
-    public var showClipDirectlyIfOnlyHasClipTool = false
-    
     /// Save the edited image to the album after editing. Defaults to true.
     public var saveNewImageAfterEdit = true
     
@@ -176,6 +184,10 @@ public class ZLPhotoConfiguration: NSObject {
     /// - warning: Only valid when `allowSelectOriginal = false`, Defaults to false.
     public var alwaysRequestOriginal = false
     
+    /// Whether to show the total size of selected photos when selecting the original image. Defaults to true.
+    /// - Note: The framework uses a conversion ratio of 1KB=1024Byte, while the system album uses 1KB=1000Byte, so the displayed photo size within the framework will be smaller than the size in the system album.
+    public var showOriginalSizeWhenSelectOriginal = true
+    
     /// Allow access to the preview large image interface (That is, whether to allow access to the large image interface after clicking the thumbnail image). Defaults to true.
     public var allowPreviewPhotos = true
     
@@ -184,6 +196,12 @@ public class ZLPhotoConfiguration: NSObject {
     
     /// Whether to display the selected count on the button. Defaults to true.
     public var showSelectCountOnDoneBtn = true
+    
+    /// In single selection mode, whether to display the selection button. Defaults to false.
+    public var showSelectBtnWhenSingleSelect = false
+
+    /// Display the index of the selected photos. Defaults to true.
+    public var showSelectedIndex = true
     
     /// Maximum cropping time when editing video, unit: second. Defaults to 10.
     public var maxEditVideoTime: ZLPhotoConfiguration.Second = 10
@@ -220,19 +238,14 @@ public class ZLPhotoConfiguration: NSObject {
     /// This block will be called when cancel selecting an asset.
     public var didDeselectAsset: ((PHAsset) -> Void)?
     
-    /// If user choose limited Photo mode, a button with '+' will be added to the ZLThumbnailViewController. It will call PHPhotoLibrary.shared().presentLimitedLibraryPicker(from:) to add photo. Defaults to true.
-    /// E.g., Sina Weibo's ImagePicker
-    public var showAddPhotoButton = true
-    
-    /// iOS14 limited Photo mode, will show collection footer view in ZLThumbnailViewController.
-    /// Will go to system setting if clicked. Defaults to true.
-    public var showEnterSettingTips = true
+    /// This block will be called when clicking the camera button in the library.
+    public var canEnterCamera: (() -> Bool)?
     
     /// The maximum number of frames for GIF images. To avoid crashes due to memory spikes caused by loading GIF images with too many frames, it is recommended that this value is not too large. Defaults to 50.
     public var maxFrameCountForGIF = 50
     
     /// You can use this block to customize the playback of GIF images to achieve better results. For example, use FLAnimatedImage to play GIFs. Defaults to nil.
-    public var gifPlayBlock: ((UIImageView, Data, [AnyHashable: Any]?) -> Void)?
+    public var gifPlayBlock: ((UIImageView, Data, PHAsset, [AnyHashable: Any]?) -> Void)?
     
     /// Pause GIF image playback, used together with gifPlayBlock. Defaults to nil.
     public var pauseGIFBlock: ((UIImageView) -> Void)?
@@ -242,6 +255,9 @@ public class ZLPhotoConfiguration: NSObject {
     
     /// Callback after the no authority alert dismiss.
     public var noAuthorityCallback: ((ZLNoAuthorityType) -> Void)?
+    
+    /// Allow user to provide a custom alert while presenting ZLPhotoPreviewSheet with the authority is denied.
+    public var customAlertWhenNoAuthority: ((ZLNoAuthorityType) -> Void)?
     
     /// Allow user to do something before select photo result callback.
     /// And you must call the second parameter of this block to continue the photos selection.

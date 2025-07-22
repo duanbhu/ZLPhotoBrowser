@@ -36,6 +36,20 @@ import UIKit
 
 @objcMembers
 public class ZLEditImageConfiguration: NSObject {
+    private static let defaultColors: [UIColor] = [
+        .white,
+        .black,
+        .zl.rgba(249, 80, 81),
+        .zl.rgba(248, 156, 59),
+        .zl.rgba(255, 195, 0),
+        .zl.rgba(145, 211, 0),
+        .zl.rgba(0, 193, 94),
+        .zl.rgba(16, 173, 254),
+        .zl.rgba(16, 132, 236),
+        .zl.rgba(99, 103, 240),
+        .zl.rgba(127, 127, 127)
+    ]
+    
     private var pri_tools: [ZLEditImageConfiguration.EditTool] = ZLEditImageConfiguration.EditTool.allCases
     /// Edit image tools. (Default order is draw, clip, imageSticker, textSticker, mosaic, filtter)
     /// Because Objective-C Array can't contain Enum styles, so this property is invalid in Objective-C.
@@ -61,26 +75,12 @@ public class ZLEditImageConfiguration: NSObject {
         }
     }
     
-    private static let defaultDrawColors: [UIColor] = [
-        .white,
-        .black,
-        .zl.rgba(249, 80, 81),
-        .zl.rgba(248, 156, 59),
-        .zl.rgba(255, 195, 0),
-        .zl.rgba(145, 211, 0),
-        .zl.rgba(0, 193, 94),
-        .zl.rgba(16, 173, 254),
-        .zl.rgba(16, 132, 236),
-        .zl.rgba(99, 103, 240),
-        .zl.rgba(127, 127, 127)
-    ]
-    
-    private var pri_drawColors = ZLEditImageConfiguration.defaultDrawColors
+    private var pri_drawColors = ZLEditImageConfiguration.defaultColors
     /// Draw colors for image editor.
     public var drawColors: [UIColor] {
         get {
             if pri_drawColors.isEmpty {
-                return ZLEditImageConfiguration.defaultDrawColors
+                return ZLEditImageConfiguration.defaultColors
             } else {
                 return pri_drawColors
             }
@@ -108,26 +108,12 @@ public class ZLEditImageConfiguration: NSObject {
         }
     }
     
-    private static let defaultTextStickerTextColors: [UIColor] = [
-        .white,
-        .black,
-        .zl.rgba(249, 80, 81),
-        .zl.rgba(248, 156, 59),
-        .zl.rgba(255, 195, 0),
-        .zl.rgba(145, 211, 0),
-        .zl.rgba(0, 193, 94),
-        .zl.rgba(16, 173, 254),
-        .zl.rgba(16, 132, 236),
-        .zl.rgba(99, 103, 240),
-        .zl.rgba(127, 127, 127)
-    ]
-    
-    private var pri_textStickerTextColors: [UIColor] = ZLEditImageConfiguration.defaultTextStickerTextColors
+    private var pri_textStickerTextColors: [UIColor] = ZLEditImageConfiguration.defaultColors
     /// Text sticker colors for image editor.
     public var textStickerTextColors: [UIColor] {
         get {
             if pri_textStickerTextColors.isEmpty {
-                return ZLEditImageConfiguration.defaultTextStickerTextColors
+                return ZLEditImageConfiguration.defaultColors
             } else {
                 return pri_textStickerTextColors
             }
@@ -139,6 +125,9 @@ public class ZLEditImageConfiguration: NSObject {
     
     /// The default text sticker color. If this color not in textStickerTextColors, will pick the first color in textStickerTextColors as the default.
     public var textStickerDefaultTextColor = UIColor.white
+    
+    /// The default font of text sticker.
+    public var textStickerDefaultFont: UIFont?
     
     private var pri_filters: [ZLFilter] = ZLFilter.all
     /// Filters for image editor.
@@ -181,6 +170,9 @@ public class ZLEditImageConfiguration: NSObject {
             adjustTools = adjustTools_objc.compactMap { ZLEditImageConfiguration.AdjustTool(rawValue: $0) }
         }
     }
+    
+    /// If image edit tools only has clip and this property is true. When you click edit, the cropping interface (i.e. ZLClipImageViewController) will be displayed. Defaults to false.
+    public var showClipDirectlyIfOnlyHasClipTool = false
     
     /// Give an impact feedback when the adjust slider value is zero. Defaults to true.
     public var impactFeedbackWhenAdjustSliderValueIsZero = true
@@ -283,6 +275,12 @@ public extension ZLEditImageConfiguration {
     }
     
     @discardableResult
+    func textStickerDefaultFont(_ font: UIFont?) -> ZLEditImageConfiguration {
+        textStickerDefaultFont = font
+        return self
+    }
+    
+    @discardableResult
     func filters(_ filters: [ZLFilter]) -> ZLEditImageConfiguration {
         self.filters = filters
         return self
@@ -297,6 +295,12 @@ public extension ZLEditImageConfiguration {
     @discardableResult
     func adjustTools(_ tools: [ZLEditImageConfiguration.AdjustTool]) -> ZLEditImageConfiguration {
         adjustTools = tools
+        return self
+    }
+    
+    @discardableResult
+    func showClipDirectlyIfOnlyHasClipTool(_ value: Bool) -> ZLEditImageConfiguration {
+        showClipDirectlyIfOnlyHasClipTool = value
         return self
     }
     
@@ -349,6 +353,8 @@ extension ZLImageClipRatio {
 }
 
 public extension ZLImageClipRatio {
+    @objc static let all: [ZLImageClipRatio] = [.custom, .circle, .wh1x1, .wh3x4, .wh4x3, .wh2x3, .wh3x2, .wh9x16, .wh16x9]
+    
     @objc static let custom = ZLImageClipRatio(title: "custom", whRatio: 0)
     
     @objc static let circle = ZLImageClipRatio(title: "circle", whRatio: 1, isCircle: true)

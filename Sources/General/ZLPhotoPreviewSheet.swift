@@ -27,8 +27,8 @@
 import UIKit
 import Photos
 
+@available(*, deprecated, message: "Please use ZLPhotoPicker instead. The permission of ZLPhotoPreviewSheet will be changed to private later.")
 public class ZLPhotoPreviewSheet: UIView {
-    
     private enum Layout {
         static let colH: CGFloat = 155
         
@@ -124,7 +124,11 @@ public class ZLPhotoPreviewSheet: UIView {
     
     private weak var sender: UIViewController?
     
-    private lazy var fetchImageQueue = OperationQueue()
+    private lazy var fetchImageQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 3
+        return queue
+    }()
     
     /// Success callback
     /// block params
@@ -140,6 +144,10 @@ public class ZLPhotoPreviewSheet: UIView {
     
     @objc public var cancelBlock: (() -> Void)?
     
+    var selectPhotosBlock: ((_ models: [ZLPhotoModel], _ isOriginal: Bool) -> Void)?
+    
+    var showLibraryBlock: ((_ models: [ZLPhotoModel], _ isOriginal: Bool) -> Void)?
+    
     deinit {
         zl_debugPrint("ZLPhotoPreviewSheet deinit")
     }
@@ -147,7 +155,6 @@ public class ZLPhotoPreviewSheet: UIView {
     /// - Parameter selectedAssets: preselected assets
     @objc public convenience init(selectedAssets: [PHAsset]? = nil) {
         self.init(frame: .zero)
-        
         let config = ZLPhotoConfiguration.default()
         selectedAssets?.zl.removeDuplicate().forEach { asset in
             if !config.allowMixSelect, asset.mediaType == .video {
@@ -162,7 +169,7 @@ public class ZLPhotoPreviewSheet: UIView {
     
     /// Using this init method, you can continue editing the selected photo.
     /// - Note:
-    ///     Provided that saveNewImageAfterEdit = false
+    ///     If you want to continue the last edit, you need to satisfy the value of `saveNewImageAfterEdit` is `false` at the time of the last selection.
     /// - Parameters:
     ///    - results : preselected results
     @objc public convenience init(results: [ZLResultModel]? = nil) {
@@ -184,6 +191,20 @@ public class ZLPhotoPreviewSheet: UIView {
         }
     }
     
+    @objc public convenience init(models: [ZLPhotoModel]? = nil) {
+        self.init(frame: .zero)
+        
+        let config = ZLPhotoConfiguration.default()
+        models?.forEach { item in
+            if !config.allowMixSelect, item.asset.mediaType == .video {
+                return
+            }
+            
+            item.isSelected = true
+            self.arrSelectedModels.append(item)
+        }
+    }
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         
@@ -193,7 +214,6 @@ public class ZLPhotoPreviewSheet: UIView {
             config.allowSelectImage = true
         }
         
-        fetchImageQueue.maxConcurrentOperationCount = 3
         setupUI()
     }
     
@@ -271,10 +291,12 @@ public class ZLPhotoPreviewSheet: UIView {
         return true
     }
     
+    /// - Warning: When calling this method in OC language, make sure that the `sender` is not zero
     @objc public func showPreview(animate: Bool = true, sender: UIViewController) {
         show(preview: true, animate: animate, sender: sender)
     }
     
+    /// - Warning: When calling this method in OC language, make sure that the `sender` is not zero
     @objc public func showPhotoLibrary(sender: UIViewController) {
         show(preview: false, animate: false, sender: sender)
     }
@@ -323,14 +345,15 @@ public class ZLPhotoPreviewSheet: UIView {
         self.animate = animate
         self.sender = sender
         
-        let status = PHPhotoLibrary.authorizationStatus()
+        let status = PHPhotoLibrary.zl.authStatus(for: .readWrite)
         if status == .restricted || status == .denied {
             showNoAuthorityAlert()
         } else if status == .notDetermined {
             PHPhotoLibrary.requestAuthorization { status in
                 ZLMainAsync {
                     if status == .denied {
-                        self.showNoAuthorityAlert()
+                        // 不符合苹果审核，这里注释掉 https://github.com/longitachi/ZLPhotoBrowser/issues/969#issuecomment-2601632232
+//                        self.showNoAuthorityAlert()
                     } else if status == .authorized {
                         if self.preview {
                             self.loadPhotos()
@@ -354,19 +377,18 @@ public class ZLPhotoPreviewSheet: UIView {
         }
         
         // Register for the album change notification when the status is limited, because the photoLibraryDidChange method will be repeated multiple times each time the album changes, causing the interface to refresh multiple times. So the album changes are not monitored in other authority.
-        if #available(iOS 14.0, *), preview, PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited {
+        if #available(iOS 14.0, *), preview, PHPhotoLibrary.zl.authStatus(for: .readWrite) == .limited {
             PHPhotoLibrary.shared().register(self)
         }
     }
     
     private func loadPhotos() {
-        arrDataSources.removeAll()
-        
         let config = ZLPhotoConfiguration.default()
         ZLPhotoManager.getCameraRollAlbum(allowSelectImage: config.allowSelectImage, allowSelectVideo: config.allowSelectVideo) { [weak self] cameraRoll in
             guard let `self` = self else { return }
             var totalPhotos = ZLPhotoManager.fetchPhoto(in: cameraRoll.result, ascending: false, allowSelectImage: config.allowSelectImage, allowSelectVideo: config.allowSelectVideo, limitCount: config.maxPreviewCount)
             markSelected(source: &totalPhotos, selected: &self.arrSelectedModels)
+            self.arrDataSources.removeAll()
             self.arrDataSources.append(contentsOf: totalPhotos)
             self.collectionView.reloadData()
         }
@@ -399,7 +421,7 @@ public class ZLPhotoPreviewSheet: UIView {
         }
     }
     
-    private func hide(completion: (() -> Void)? = nil) {
+    func hide(completion: (() -> Void)? = nil) {
         if animate {
             var frame = baseView.frame
             frame.origin.y += baseViewHeight
@@ -423,10 +445,15 @@ public class ZLPhotoPreviewSheet: UIView {
     }
     
     private func showNoAuthorityAlert() {
+        if let customAlertWhenNoAuthority = ZLPhotoConfiguration.default().customAlertWhenNoAuthority {
+            customAlertWhenNoAuthority(.library)
+            return
+        }
+        
         let action = ZLCustomAlertAction(title: localLanguageTextValue(.ok), style: .default) { _ in
             ZLPhotoConfiguration.default().noAuthorityCallback?(.library)
         }
-        showAlertController(title: nil, message: String(format: localLanguageTextValue(.noPhotoLibratyAuthority), getAppName()), style: .alert, actions: [action], sender: self.sender)
+        showAlertController(title: nil, message: String(format: localLanguageTextValue(.noPhotoLibraryAuthorityAlertMessage), getAppName()), style: .alert, actions: [action], sender: sender)
     }
     
     @objc private func tapAction(_ tap: UITapGestureRecognizer) {
@@ -437,6 +464,8 @@ public class ZLPhotoPreviewSheet: UIView {
     
     @objc private func cameraBtnClick() {
         let config = ZLPhotoConfiguration.default()
+        guard config.canEnterCamera?() ?? true else { return }
+        
         if config.useCustomCamera {
             let camera = ZLCustomCamera()
             camera.takeDoneBlock = { [weak self] image, videoUrl in
@@ -469,7 +498,7 @@ public class ZLPhotoPreviewSheet: UIView {
                 picker.videoMaximumDuration = TimeInterval(config.cameraConfiguration.maxRecordDuration)
                 sender?.showDetailViewController(picker, sender: nil)
             } else {
-                showAlertView(String(format: localLanguageTextValue(.noCameraAuthority), getAppName()), sender)
+                showAlertView(String(format: localLanguageTextValue(.noCameraAuthorityAlertMessage), getAppName()), sender)
             }
         }
     }
@@ -477,7 +506,12 @@ public class ZLPhotoPreviewSheet: UIView {
     @objc private func photoLibraryBtnClick() {
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
         animate = false
-        showThumbnailViewController()
+        
+        if let showLibraryBlock {
+            showLibraryBlock(arrSelectedModels, isSelectOriginal)
+        } else {
+            showThumbnailViewController()
+        }
     }
     
     @objc private func cancelBtnClick() {
@@ -487,7 +521,12 @@ public class ZLPhotoPreviewSheet: UIView {
             }
             return
         }
-        requestSelectPhoto()
+        
+        if let selectPhotosBlock {
+            selectPhotosBlock(arrSelectedModels, isSelectOriginal)
+        } else {
+            requestSelectPhoto()
+        }
     }
     
     @objc private func panSelectAction(_ pan: UIPanGestureRecognizer) {
@@ -739,8 +778,8 @@ public class ZLPhotoPreviewSheet: UIView {
             let vc = ZLEditVideoViewController(avAsset: avAsset)
             vc.editFinishBlock = { [weak self] url in
                 if let url = url {
-                    ZLPhotoManager.saveVideoToAlbum(url: url) { [weak self] suc, asset in
-                        if suc, let asset = asset {
+                    ZLPhotoManager.saveVideoToAlbum(url: url) { [weak self] error, asset in
+                        if error == nil, let asset {
                             let m = ZLPhotoModel(asset: asset)
                             m.isSelected = true
                             self?.arrSelectedModels.removeAll()
@@ -783,7 +822,14 @@ public class ZLPhotoPreviewSheet: UIView {
             self?.isSelectOriginal = nav?.isSelectedOriginal ?? false
             self?.arrSelectedModels.removeAll()
             self?.arrSelectedModels.append(contentsOf: nav?.arrSelectedModels ?? [])
-            self?.requestSelectPhoto(viewController: nav)
+            
+            if let block = self?.selectPhotosBlock {
+                nav?.dismiss(animated: true) {
+                    block(self?.arrSelectedModels ?? [], self?.isSelectOriginal ?? false)
+                }
+            } else {
+                self?.requestSelectPhoto(viewController: nav)
+            }
         }
         
         nav.cancelBlock = { [weak self] in
@@ -801,9 +847,9 @@ public class ZLPhotoPreviewSheet: UIView {
     private func save(image: UIImage?, videoUrl: URL?) {
         if let image = image {
             let hud = ZLProgressHUD.show(toast: .processing)
-            ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] suc, asset in
+            ZLPhotoManager.saveImageToAlbum(image: image) { [weak self] error, asset in
                 hud.hide()
-                if suc, let asset = asset {
+                if error == nil, let asset {
                     let model = ZLPhotoModel(asset: asset)
                     self?.handleDataArray(newModel: model)
                 } else {
@@ -812,10 +858,10 @@ public class ZLPhotoPreviewSheet: UIView {
             }
         } else if let videoUrl = videoUrl {
             let hud = ZLProgressHUD.show(toast: .processing)
-            ZLPhotoManager.saveVideoToAlbum(url: videoUrl) { [weak self] suc, asset in
+            ZLPhotoManager.saveVideoToAlbum(url: videoUrl) { [weak self] error, asset in
                 hud.hide()
-                if suc, let at = asset {
-                    let model = ZLPhotoModel(asset: at)
+                if error == nil, let asset {
+                    let model = ZLPhotoModel(asset: asset)
                     self?.handleDataArray(newModel: model)
                 } else {
                     showAlertView(localLanguageTextValue(.saveVideoError), self?.sender)
@@ -827,7 +873,6 @@ public class ZLPhotoPreviewSheet: UIView {
     private func handleDataArray(newModel: ZLPhotoModel) {
         arrDataSources.insert(newModel, at: 0)
         let config = ZLPhotoConfiguration.default()
-        let uiConfig = ZLPhotoUIConfiguration.default()
         
         var canSelect = true
         // If mixed selection is not allowed, and the newModel type is video, it will not be selected.
@@ -835,7 +880,7 @@ public class ZLPhotoPreviewSheet: UIView {
             canSelect = false
         }
         // 单选模式，且不显示选择按钮时，不允许选择
-        if config.maxSelectCount == 1, !uiConfig.showSelectBtnWhenSingleSelect {
+        if config.maxSelectCount == 1, !config.showSelectBtnWhenSingleSelect {
             canSelect = false
         }
         if canSelect, canAddModel(newModel, currentSelectCount: arrSelectedModels.count, sender: sender, showAlert: false) {
@@ -852,29 +897,25 @@ public class ZLPhotoPreviewSheet: UIView {
         }
         
         let insertIndexPath = IndexPath(row: 0, section: 0)
-        collectionView.performBatchUpdates({
+        collectionView.performBatchUpdates {
             self.collectionView.insertItems(at: [insertIndexPath])
-        }) { _ in
+        } completion: { _ in
             self.collectionView.scrollToItem(at: insertIndexPath, at: .centeredHorizontally, animated: true)
             self.collectionView.reloadItems(at: self.collectionView.indexPathsForVisibleItems)
         }
         
         changeCancelBtnTitle()
     }
-    
 }
 
 extension ZLPhotoPreviewSheet: UIGestureRecognizerDelegate {
-    
     override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
         return !baseView.frame.contains(location)
     }
-    
 }
 
 extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
-    
     public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let m = arrDataSources[indexPath.row]
         let w = CGFloat(m.asset.pixelWidth)
@@ -892,7 +933,6 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLThumbnailPhotoCell.zl.identifier, for: indexPath) as! ZLThumbnailPhotoCell
         
         let config = ZLPhotoConfiguration.default()
-        let uiConfig = ZLPhotoUIConfiguration.default()
         
         let model = arrDataSources[indexPath.row]
         
@@ -927,9 +967,9 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
             }
         }
         
-        if uiConfig.showSelectedIndex,
-           let index = arrSelectedModels.firstIndex(where: { $0 == model }){
-            setCellIndex(cell, showIndexLabel: true, index: index + 1)
+        if config.showSelectedIndex,
+           let index = arrSelectedModels.firstIndex(where: { $0 == model }) {
+            setCellIndex(cell, showIndexLabel: true, index: index + config.initialIndex)
         } else {
             cell.indexLabel.isHidden = true
         }
@@ -1031,7 +1071,7 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
     }
     
     private func setCellIndex(_ cell: ZLThumbnailPhotoCell?, showIndexLabel: Bool, index: Int) {
-        guard ZLPhotoUIConfiguration.default().showSelectedIndex else {
+        guard ZLPhotoConfiguration.default().showSelectedIndex else {
             return
         }
         
@@ -1047,7 +1087,7 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
         cameraBtn.alpha = cameraIsEnable ? 1 : 0.3
         cameraBtn.isEnabled = cameraIsEnable
         
-        let showIndex = uiConfig.showSelectedIndex
+        let showIndex = config.showSelectedIndex
         let showMask = uiConfig.showSelectedMask || uiConfig.showInvalidMask
         
         guard showIndex || showMask else {
@@ -1068,7 +1108,7 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
             for (index, selM) in arrSelectedModels.enumerated() {
                 if m == selM {
                     show = true
-                    idx = index + 1
+                    idx = index + config.initialIndex
                     isSelected = true
                     break
                 }
@@ -1125,7 +1165,7 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
     }
     
     private func changeCancelBtnTitle() {
-        if arrSelectedModels.count > 0 {
+        if !arrSelectedModels.isEmpty {
             cancelBtn.setTitle(String(format: "%@(%ld)", localLanguageTextValue(.done), arrSelectedModels.count), for: .normal)
             cancelBtn.setTitleColor(.zl.previewBtnHighlightTitleColor, for: .normal)
         } else {
@@ -1133,10 +1173,12 @@ extension ZLPhotoPreviewSheet: UICollectionViewDataSource, UICollectionViewDeleg
             cancelBtn.setTitleColor(.zl.previewBtnTitleColor, for: .normal)
         }
     }
-    
 }
 
 extension ZLPhotoPreviewSheet: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
     
     public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
         picker.dismiss(animated: true) {
@@ -1145,16 +1187,13 @@ extension ZLPhotoPreviewSheet: UIImagePickerControllerDelegate, UINavigationCont
             self.save(image: image, videoUrl: url)
         }
     }
-    
 }
 
 extension ZLPhotoPreviewSheet: PHPhotoLibraryChangeObserver {
-    
     public func photoLibraryDidChange(_ changeInstance: PHChange) {
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
         ZLMainAsync {
             self.loadPhotos()
         }
     }
-    
 }

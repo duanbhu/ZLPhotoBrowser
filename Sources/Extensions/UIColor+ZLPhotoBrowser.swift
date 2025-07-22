@@ -105,6 +105,16 @@ extension ZLPhotoBrowserWrapper where Base: UIColor {
         ZLPhotoUIConfiguration.default().previewVCBgColor
     }
     
+    /// 无相册访问权限时，提示标题和描述的文本颜色
+    static var noLibraryAuthTitleAndDescColor: UIColor {
+        ZLPhotoUIConfiguration.default().noLibraryAuthTitleAndDescColor
+    }
+    
+    /// 无相册访问权限时，前往系统设置按钮标题颜色
+    static var noLibraryAuthGotoSettingBtnTitleColor: UIColor {
+        ZLPhotoUIConfiguration.default().noLibraryAuthGotoSettingBtnTitleColor
+    }
+    
     /// 相册列表界面底部工具条底色
     static var bottomToolViewBgColor: UIColor {
         ZLPhotoUIConfiguration.default().bottomToolViewBgColor
@@ -113,6 +123,16 @@ extension ZLPhotoBrowserWrapper where Base: UIColor {
     /// 预览大图界面底部工具条底色
     static var bottomToolViewBgColorOfPreviewVC: UIColor {
         ZLPhotoUIConfiguration.default().bottomToolViewBgColorOfPreviewVC
+    }
+    
+    /// 小图界面原图大小label字体颜色
+    static var originalSizeLabelTextColor: UIColor {
+        ZLPhotoUIConfiguration.default().originalSizeLabelTextColor
+    }
+    
+    /// 预览大图界面原图大小label字体颜色
+    static var originalSizeLabelTextColorOfPreviewVC: UIColor {
+        ZLPhotoUIConfiguration.default().originalSizeLabelTextColorOfPreviewVC
     }
     
     /// 相册列表界面底部工具栏按钮 可交互 状态标题颜色
@@ -251,6 +271,10 @@ extension ZLPhotoBrowserWrapper where Base: UIColor {
     }
 }
 
+extension UIColor {
+    typealias ZLARGB = (alpha: CGFloat, red: CGFloat, green: CGFloat, blue: CGFloat)
+}
+
 extension ZLPhotoBrowserWrapper where Base: UIColor {
     /// - Parameters:
     ///   - r: 0~255
@@ -259,5 +283,15 @@ extension ZLPhotoBrowserWrapper where Base: UIColor {
     ///   - a: 0~1
     static func rgba(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> UIColor {
         return UIColor(red: r / 255, green: g / 255, blue: b / 255, alpha: a)
+    }
+    
+    func argbTuple() -> UIColor.ZLARGB {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        
+        base.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return (alpha, red, green, blue)
     }
 }
