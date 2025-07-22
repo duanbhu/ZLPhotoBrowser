@@ -34,6 +34,8 @@ import Photos
 
 public typealias ZLImageLoaderBlock = (_ url: URL, _ imageView: UIImageView, _ progress: @escaping (CGFloat) -> Void, _ complete: @escaping () -> Void) -> Void
 
+public typealias OtherLoaderBlock = ( _ imageView: UIImageView) -> Void
+
 @objc public protocol ZLImagePreviewControllerDelegate: AnyObject {
     @objc optional func imagePreviewController(_ controller: ZLImagePreviewController, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath)
     
@@ -62,6 +64,9 @@ public class ZLImagePreviewController: UIViewController {
     public private(set) var currentIndex: Int
     
     private var indexBeforOrientationChanged: Int
+    
+    /// 在图片上加载额外的元素
+    open var otherLoaderBlock: OtherLoaderBlock?
     
     lazy var collectionView: UICollectionView = {
         let layout = ZLCollectionViewFlowLayout()
@@ -581,7 +586,6 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
                 baseCell.singleTapBlock = { [weak self] in
                     self?.tapPreviewCell()
                 }
-                
                 // livePhoto 不添加长按手势，因为与播放手势冲突
                 return baseCell
             } else if config.allowSelectVideo, model.type == .video {
@@ -594,14 +598,13 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLPhotoPreviewCell.zl.identifier, for: indexPath) as! ZLPhotoPreviewCell
 
                 cell.model = model
-
                 baseCell = cell
             }
         } else if let image = obj as? UIImage {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLLocalImagePreviewCell.zl.identifier, for: indexPath) as! ZLLocalImagePreviewCell
             
             cell.image = image
-            
+            otherLoaderBlock?(cell.preview.imageView)
             baseCell = cell
         } else if let url = obj as? URL {
             let type: ZLURLType = urlType?(url) ?? .image
@@ -618,7 +621,7 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
                         cell?.preview.resetSubViewSize()
                     }
                 })
-                
+                otherLoaderBlock?(cell.preview.imageView)
                 baseCell = cell
             } else {
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ZLNetVideoPreviewCell.zl.identifier, for: indexPath) as! ZLNetVideoPreviewCell
@@ -795,16 +798,31 @@ extension ZLImagePreviewController: UICollectionViewDataSource, UICollectionView
         PHImageManager.default().cancelImageRequest(imageRequestID)
     }
     
+    /// 保存图片（连同加在imageView上的水印部分）
     public func saveImageWithOthers() {
-        guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) as? ZLLocalImagePreviewCell else {
+        guard let cell = collectionView.cellForItem(at: IndexPath(row: currentIndex, section: 0)) else {
             return
         }
         
         let hud = ZLProgressHUD.show(toast: .processing)
-        let imageView = cell.preview.imageView
+        var imageView: UIImageView? = nil
+        if let cell = cell as? ZLLocalImagePreviewCell {
+            imageView = cell.preview.imageView
+        } else if let cell = cell as? ZLNetImagePreviewCell {
+            imageView = cell.preview.imageView
+        } 
+        
+        guard let imageView = imageView else { hud.hide(); return }
+        
         let renderer = UIGraphicsImageRenderer(bounds: imageView.bounds)
         let image = renderer.image { context in
             imageView.layer.render(in: context.cgContext)
+        }
+        ZLPhotoManager.saveImageToAlbum(image: image) { error, _ in
+            hud.hide()
+            if error != nil {
+                showAlertView(localLanguageTextValue(.saveImageError), self)
+            }
         }
     }
 }
